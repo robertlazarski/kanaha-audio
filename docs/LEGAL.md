@@ -29,9 +29,11 @@ Kanaha Audio is licensed under the Apache License 2.0. All dependencies use perm
 
 libltc is the only weak-copyleft dependency. It is statically linked into the kanaha-audio-httpd binary. Per LGPL-3.0 §4, users must be able to relink the application with a modified version of libltc. Compliance is achieved by:
 
-1. **Object files:** `build-android.sh` produces all `.o` files in `build-android/` during the build
+1. **Object files distributed in releases:** GitHub releases must include a `build-android-objects.tar.gz` containing all `.o` files from `build-android/`. This is the "Corresponding Application Code" required by LGPL-3.0 §4(d)(0)
 2. **Build script:** `build-android.sh` contains the full link command, allowing relinking with a replacement `libltc.a`
 3. **Source available:** libltc source is at https://github.com/x42/libltc (LGPL-3.0)
+
+**Release checklist item:** Every release that includes the kanaha-audio-httpd binary must also include the application object files. The build script produces them in `build-android/`. Package them: `tar czf build-android-objects.tar.gz build-android/*.o` and attach to the GitHub release.
 
 **Impact on upstream:** libltc is Category B under ASF policy. Code that directly calls libltc functions (specifically `kanaha-audio-app/app/src/main/cpp/ltc/ltc_decoder.c`) should be reviewed if contributing to an Apache project. The wrapper isolates libltc behind a clean API boundary — the rest of the codebase has no libltc dependency and remains Category A compatible.
 
