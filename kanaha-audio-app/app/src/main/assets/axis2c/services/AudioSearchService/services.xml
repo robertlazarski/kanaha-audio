@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Kanaha Audio Search Service — HTTP/2 JSON-RPC + MCP -->
+<serviceGroup>
+    <service name="AudioSearchService">
+        <description>
+            Kanaha Audio Search Service — audio keyword search, transcription,
+            recording, and tone playback via HTTP/2 JSON-RPC and MCP (Model
+            Context Protocol). Uses whisper.cpp for on-device speech-to-text,
+            YAMNet for audio event detection, AAudio NDK for microphone recording
+            and tone generation, and GPS for location metadata. Enables automated
+            third-camera priority cuts and multi-device audio synchronization.
+        </description>
+
+        <serviceClass>audio_search_service</serviceClass>
+        <parameter name="ServiceClass">audio_search_service</parameter>
+
+        <!-- JSON-RPC catch-all for method dispatch from body -->
+        <operation name="jsonrpc">
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="searchKeywords">
+            <parameter name="mcpDescription">Search for keyword phrases in an audio file and return timestamps. Primary use case: finding 'next slide please' to automate third-camera priority cuts. Returns matches with start_ms, end_ms, and confidence.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"audio_file":{"type":"string","description":"Path to audio file (WAV)"},"keywords":{"type":"array","items":{"type":"string"},"description":"Keyword phrases to search for"}},"required":["audio_file","keywords"]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/searchKeywords</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="transcribe">
+            <parameter name="mcpDescription">Transcribe an audio file with word-level timestamps using whisper.cpp.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"audio_file":{"type":"string","description":"Path to audio file (WAV)"}},"required":["audio_file"]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/transcribe</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="getStatus">
+            <parameter name="mcpDescription">Get audio service status: whisper model state, device info, memory usage.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{},"required":[]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/getStatus</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="listModels">
+            <parameter name="mcpDescription">List available whisper ggml models on the device with sizes and loaded state.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{},"required":[]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/listModels</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="loadModel">
+            <parameter name="mcpDescription">Load or switch the active whisper model. Only one at a time.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"model":{"type":"string","description":"Model name: tiny, base, small, medium"}},"required":["model"]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/loadModel</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="detectAudioEvents">
+            <parameter name="mcpDescription">Detect non-speech audio events using YAMNet (Google AudioSet classifier). Identifies instruments (Saxophone, Piano, Guitar), events (Applause, Silence), and 521 other AudioSet classes with timestamps and confidence scores.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"audio_file":{"type":"string","description":"Path to audio file (WAV)"},"events":{"type":"array","items":{"type":"string"},"description":"AudioSet class names to detect"},"threshold":{"type":"number","description":"Confidence threshold 0.0-1.0 (default 0.5)"},"mode":{"type":"string","description":"all, first_onset, or last_offset"},"time_range_start":{"type":"number","description":"Start of search window (seconds)"},"time_range_end":{"type":"number","description":"End of search window (seconds)"}},"required":["audio_file","events"]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/detectAudioEvents</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="listAudioFiles">
+            <parameter name="mcpDescription">List audio files available for processing.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"directory":{"type":"string","description":"Directory to scan. Default: app audio directory"}},"required":[]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/listAudioFiles</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="startRecording">
+            <parameter name="mcpDescription">Start recording audio from the device microphone to WAV format. Supports start_at scheduling for multi-device sync.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"clip_name":{"type":"string","description":"Name for the recording (WAV filename prefix)"},"sample_rate":{"type":"integer","description":"16000 (default) or 44100"},"start_at":{"type":"integer","description":"Unix epoch ms to start. 0 = immediate"}},"required":["clip_name"]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/startRecording</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="stopRecording">
+            <parameter name="mcpDescription">Stop the active recording. Finalizes WAV header and returns duration and file size.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{},"required":[]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/stopRecording</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="playTone">
+            <parameter name="mcpDescription">Play a sine wave tone through the device speaker for multi-device synchronization. Supports start_at scheduling with kernel-level precision.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"frequency":{"type":"integer","description":"Tone frequency in Hz"},"duration_ms":{"type":"integer","description":"Duration in milliseconds"},"start_at":{"type":"integer","description":"Unix epoch ms to start. 0 = immediate"}},"required":["frequency","duration_ms"]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/playTone</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="listRecordings">
+            <parameter name="mcpDescription">List WAV recordings with file sizes and estimated durations.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{},"required":[]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/listRecordings</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+    </service>
+</serviceGroup>

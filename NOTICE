@@ -1,0 +1,119 @@
+Kanaha Audio
+Copyright 2025-2026 Robert Lazarski
+
+This product includes software developed by:
+
+=============================================================================
+whisper.cpp
+=============================================================================
+Copyright (c) 2023-2024 Georgi Gerganov
+https://github.com/ggml-org/whisper.cpp
+License: MIT License
+
+Kanaha Audio uses whisper.cpp for on-device speech-to-text
+transcription and keyword search.
+
+=============================================================================
+TensorFlow Lite
+=============================================================================
+Copyright (C) 2019 The TensorFlow Authors
+https://www.tensorflow.org/lite
+License: Apache License 2.0
+
+Kanaha Audio uses TensorFlow Lite for YAMNet audio event detection
+(521 AudioSet classes including instruments, speech, music).
+
+=============================================================================
+YAMNet
+=============================================================================
+Copyright (C) 2019 Google LLC
+https://tfhub.dev/google/yamnet
+License: Apache License 2.0
+
+YAMNet is a pre-trained audio event classifier from Google Research.
+
+=============================================================================
+libssh2
+=============================================================================
+Copyright (C) 2004-2019 Sara Golemon, et al.
+https://libssh2.org/
+License: BSD 3-Clause License
+
+Kanaha Audio uses libssh2 for SFTP file transfer with ed25519
+SSH key authentication.
+
+=============================================================================
+libltc
+=============================================================================
+Copyright (C) 2006-2024 Robin Gareus
+https://github.com/x42/libltc
+License: GNU Lesser General Public License v3.0 (LGPL-3.0)
+
+Kanaha Audio uses libltc for decoding SMPTE/LTC timecode from
+audio recordings. Statically linked — object files provided in
+build-android/ for relinking per LGPL-3.0 §4.
+
+=============================================================================
+ggml
+=============================================================================
+Copyright (c) 2023-2024 Georgi Gerganov
+https://github.com/ggml-org/ggml
+License: MIT License
+
+ggml is the tensor library used by whisper.cpp for ML inference.
+
+=============================================================================
+Apache Axis2/C
+=============================================================================
+Copyright (C) The Apache Software Foundation
+https://axis.apache.org/axis2/c/
+License: Apache License 2.0
+
+Kanaha Audio integrates with Apache Axis2/C for HTTP/2 JSON-RPC
+web services, following the user guide patterns described in the Apache
+Axis2/C project documentation.
+
+=============================================================================
+Apache HTTP Server (httpd)
+=============================================================================
+Copyright (C) The Apache Software Foundation
+https://httpd.apache.org/
+License: Apache License 2.0
+
+Kanaha Audio uses Apache httpd as its HTTP/2 server, cross-compiled
+for Android.
+
+=============================================================================
+Apache Portable Runtime (APR)
+=============================================================================
+Copyright (C) The Apache Software Foundation
+https://apr.apache.org/
+License: Apache License 2.0
+
+=============================================================================
+OpenSSL
+=============================================================================
+Copyright (C) 1998-2024 The OpenSSL Project
+https://www.openssl.org/
+License: Apache License 2.0
+
+=============================================================================
+nghttp2
+=============================================================================
+Copyright (C) 2012-2024 Tatsuhiro Tsujikawa
+https://nghttp2.org/
+License: MIT License
+
+=============================================================================
+json-c
+=============================================================================
+Copyright (C) 2009-2012 Eric Haszlakiewicz
+https://github.com/json-c/json-c
+License: MIT License
+
+=============================================================================
+Expat XML Parser
+=============================================================================
+Copyright (C) 1998-2000 Thai Open Source Software Center Ltd
+https://libexpat.github.io/
+License: MIT License
