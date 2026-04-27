@@ -20,6 +20,9 @@ the ggml-org community.
 
 **Other Projects**
 
+OpenSSL is a trademark of the OpenSSL Software Foundation.
+iRig is a trademark of IK Multimedia.
+Moto is a trademark of Motorola Trademark Holdings, LLC (Lenovo).
 libssh2 is an open source project (BSD licensed).
 libltc is an open source project by Robin Gareus (LGPL-3.0 licensed).
 Tentacle Sync is a trademark of Tentacle Sync GmbH.
@@ -35,6 +38,9 @@ with, endorsed by, or sponsored by:
 - OpenAI (creator of the original Whisper model)
 - Google LLC (TensorFlow, YAMNet, Android, Pixel)
 - Tentacle Sync GmbH
+- IK Multimedia (iRig)
+- Motorola Trademark Holdings, LLC / Lenovo (Moto)
+- OpenSSL Software Foundation
 - Anthropic (Claude)
 - Any trademark holders mentioned in this project
 
