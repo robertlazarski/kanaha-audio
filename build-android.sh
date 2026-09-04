@@ -38,6 +38,11 @@ CFLAGS="-O2 -fPIE -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable"
 CFLAGS="$CFLAGS -DANDROID -DAPACHE_HTTPD_ANDROID"
 CFLAGS="$CFLAGS -DAXIS2_JSON_ENABLED=1 -DWITH_NGHTTP2=1 -DWITH_OPENSSL=1"
 CFLAGS="$CFLAGS -DUSE_CROSS_COMPILED_LIBS=1"
+# -fsigned-char: axis2_char_t is plain char, signed on x86 and unsigned on
+# arm64. The Axis2/C libraries are built with -fsigned-char (see its
+# configure.ac), so these sources must match or the same char behaves
+# differently either side of the call.
+CFLAGS="$CFLAGS -fsigned-char"
 
 # Include paths
 INCLUDES="-I$SRC"
@@ -79,6 +84,9 @@ echo "--- Linking ---"
     "${OBJECTS[@]}" \
     -L"$DEPS/lib" \
     -Wl,--whole-archive -laxis2_engine -Wl,--no-whole-archive \
+    -Wl,--export-dynamic \
+    -Wl,-z,max-page-size=16384 \
+    -Wl,-z,separate-loadable-segments \
     -laxis2_http_common -laxis2_http_util \
     -laxis2_axiom -laxis2_parser -lguththila -lneethi -laxutil \
     -laprutil-1 -lapr-1 -lexpat \
@@ -105,6 +113,17 @@ echo "--- Linking ---"
 
 echo "=== httpd build complete ==="
 ls -lh "$BUILD/kanaha-audio-httpd"
+
+# Strip and install into jniLibs, where Android loads it from. Without this the
+# app keeps running whatever .so was there before and a successful build looks
+# like a successful deploy.
+STRIP=$TOOLCHAIN/bin/llvm-strip
+OUTPUT_DIR=$HOME/repos/kanaha-audio/kanaha-audio-app/app/src/main/jniLibs/arm64-v8a
+"$STRIP" "$BUILD/kanaha-audio-httpd"
+mkdir -p "$OUTPUT_DIR"
+cp "$BUILD/kanaha-audio-httpd" "$OUTPUT_DIR/libkanaha_audio_httpd.so"
+echo "=== Installed: $OUTPUT_DIR/libkanaha_audio_httpd.so ==="
+ls -la "$OUTPUT_DIR/libkanaha_audio_httpd.so"
 
 # Build MCP binary (Claude Desktop stdio transport)
 echo ""
