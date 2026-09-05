@@ -4,27 +4,45 @@ Kanaha Audio shares the same security model as Kanaha Camera Control System.
 
 ## Transport Security — TLS is Mandatory
 
-Axis2/C in JSON-RPC mode uses HTTP/2, which requires TLS. The server **will not start** without certificate and key paths. There is no plain HTTP fallback.
+The app serves requests via **Apache httpd 2.4.66 (mod_http2 + mod_ssl + mod_axis2)**
+over HTTP/2 (ALPN `h2`) with mutual TLS. See
+[PATH_B_HTTP2_MIGRATION.md](PATH_B_HTTP2_MIGRATION.md) for how the server moved
+from the original hand-rolled HTTP/1.1 server to real Apache (verified on device:
+`ALPN: server accepted h2` → `HTTP/2 200`).
 
-- **HTTPS/HTTP2 + mTLS**: All API communication uses TLS with mutual certificate authentication
-- **Certificate chain**: Self-signed CA → server cert + client cert
-- **No anonymous access**: Connections without valid client certificates are rejected at the TLS handshake
-- **No plain HTTP**: Server refuses to start without `-c <cert> -k <key>` arguments
-- **Minimum TLS 1.2**: Enforced via `SSL_CTX_set_min_proto_version(TLS1_2_VERSION)`
+- **HTTPS/HTTP2 + mTLS**: all API traffic is TLS with mutual certificate auth; `Protocols h2 http/1.1` (TLS-only — there is no cleartext listener)
+- **Certificate chain**: self-signed CA → server cert + client cert (shared CA with Kanaha Camera)
+- **No anonymous access**: `SSLVerifyClient require` (in `ssl.conf`) rejects connections without a valid client cert at the TLS handshake
+- **Modern TLS only**: `SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1` (TLS 1.2 / 1.3)
 
 ### Certificate Configuration
 
+`AudioService` deploys `ssl.conf` + the certs to the Apache ServerRoot and launches
+`httpd -f conf/httpd.conf -d apache -X`; Apache enforces mTLS via `ssl.conf`
+(`SSLVerifyClient require`, `SSLCACertificateFile ssl/ca.crt`).
+
+The standalone desktop test CLI (`apache_httpd_android.c`, built by `build-android.sh`)
+still takes explicit flags:
+
 ```bash
-# Server requires these flags to start:
 kanaha-audio-httpd -p 8443 \
   -c /path/to/server.crt \    # Server certificate (PEM)
   -k /path/to/server.key \    # Server private key (PEM)
   -a /path/to/ca.crt           # CA cert for client verification (mTLS)
 ```
 
-Without `-a` (CA cert), the server runs TLS but does not verify client certificates. For production, always provide the CA cert to enable mTLS.
+Uses the same certificate infrastructure as Kanaha Camera (identical CA). The
+client cert (`CN=kanaha-control`) and `ca.key` live in the camera repo's
+`assets/ssl/`; see the Kanaha Camera docs for certificate generation.
 
-Uses the same certificate infrastructure as Kanaha Camera. See the Kanaha Camera documentation for certificate generation and deployment instructions.
+## HTTP/2 DoS Hardening (CVE-2026-49975)
+
+The "HTTP/2 Bomb" chains an HPACK indexed-reference bomb with a zero-window
+flow-control stall to exhaust server memory. `conf/http2-performance.conf` bounds
+the blast radius for a phone's limited RAM — `H2MaxSessionStreams 1`,
+`H2StreamTimeout 30`, `H2StreamMaxMemSize 65536` — alongside
+`LimitRequestFieldSize 4096` / `LimitRequestFields 50` in `httpd.conf`. The
+complete fix for the Cookie-crumb bypass is `mod_http2` ≥ 2.0.41.
 
 ## Input Validation
 
@@ -32,7 +50,7 @@ Uses the same certificate infrastructure as Kanaha Camera. See the Kanaha Camera
 - Model names are restricted to plain names (no `/` or `..` — e.g., "base", "tiny")
 - Keyword strings are sanitized before use in whisper.cpp
 - JSON string parsing handles escaped quotes to prevent injection
-- HTTP method routing uses `strncmp` anchored at position 0 (prevents request smuggling)
+- HTTP request parsing/dispatch is handled by Apache mod_http2 + mod_axis2 (the standalone test CLI anchors its `strncmp` method check at position 0 to prevent request smuggling)
 - The `listAudioFiles` directory parameter falls back to the default app directory if `..` is detected
 
 ## Architecture Security Advantage

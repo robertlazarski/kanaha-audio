@@ -1,0 +1,13 @@
+# Minimal MIME types for Kanaha Camera Control
+text/html                               html htm
+text/plain                              txt
+text/css                                css
+text/javascript                         js
+application/json                        json
+application/xml                         xml
+application/octet-stream                bin
+image/jpeg                              jpeg jpg
+image/png                               png
+image/gif                               gif
+video/mp4                               mp4
+audio/mpeg                              mp3

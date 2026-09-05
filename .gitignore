@@ -1,6 +1,15 @@
-# Private keys and certificates - NEVER commit these
+# Private keys and certificates - NEVER commit these.
+# Certs/keys are generated per-deployment (see docs/SECURITY.md); a fresh clone
+# generates its own. The shared demo CA + client cert live in the Kanaha Camera repo.
 *.key
 *.pem
+*.crt
+*.csr
+*.srl
+*.p12
+*.pfx
+*.jks
+*.keystore
 known_hosts
 servers.json
 

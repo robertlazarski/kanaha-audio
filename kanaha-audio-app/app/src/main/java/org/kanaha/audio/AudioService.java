@@ -5,19 +5,23 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright (C) 2025-2026 Robert Lazarski
  *
- * Launches the kanaha-audio-httpd native binary as a foreground service.
- * The native process handles all audio operations (whisper.cpp, YAMNet,
- * AAudio recording, LTC decode, SFTP) — no JNI needed.
+ * Launches the native Apache httpd as a foreground service (Path B). The httpd
+ * binary (packaged as libkanaha_audio_httpd.so) is a real Apache build with
+ * mod_http2 + mod_ssl + mod_axis2 and AudioSearchService statically linked, so
+ * requests are served over genuine HTTP/2 (ALPN h2) + mTLS — replacing the prior
+ * hand-rolled HTTP/1.1 server. Audio DSP (whisper.cpp, YAMNet, AAudio, LTC, SFTP)
+ * runs inside the Axis2/C service module. See docs/PATH_B_HTTP2_MIGRATION.md.
  *
- * This service exists solely to:
- *   1. Provide RECORD_AUDIO permission context for the native process
- *   2. Keep the process alive via foreground service + wake lock
- *   3. Detect port conflicts with Kanaha Camera Control
+ * This service:
+ *   1. Provides RECORD_AUDIO permission context for the native httpd child process
+ *   2. Keeps it alive via foreground service + wake lock
+ *   3. Deploys the Apache config set + certs and detects port conflicts with Camera
  *
  * Architecture:
  *   MainActivity → startForegroundService → AudioService
- *     → ProcessBuilder launches kanaha-audio-httpd
- *     → Native process handles all HTTP/2+mTLS requests
+ *     → deploy apache/ config + ssl/ certs to ServerRoot
+ *     → ProcessBuilder launches httpd -f conf/httpd.conf -d apache -X
+ *     → Apache (mod_http2 + mod_axis2) serves AudioSearchService over HTTP/2+mTLS
  */
 
 package org.kanaha.audio;
@@ -125,25 +129,40 @@ public class AudioService extends Service {
     }
 
     /**
-     * Deploy the native binary and SSL certs from assets or lib directory.
+     * Set up the Apache ServerRoot tree and deploy config + certs from assets.
+     *
+     * Path B layout (ServerRoot = filesDir/apache), mirroring the Kanaha Camera app:
+     *   apache/conf/{httpd.conf,ssl.conf,http2-performance.conf,axis2.conf,mime.types}
+     *   apache/ssl/{server.crt,server.key,ca.crt}
+     *   apache/htdocs/index.html
+     *   apache/axis2c/{axis2.xml,services/AudioSearchService/services.xml}
+     *   apache/logs/   (created so httpd can write)
      */
     private void setupFiles() throws IOException {
         File filesDir = getFilesDir();
-        File modelsDir = new File(filesDir, "models");
-        File sslDir = new File(filesDir, "ssl");
-        File audioDir = new File(filesDir, "audio");
-        File sshDir = new File(filesDir, "ssh/keys");
+        File apacheDir = new File(filesDir, "apache");
 
-        modelsDir.mkdirs();
+        // Apache ServerRoot tree
+        new File(apacheDir, "conf").mkdirs();
+        new File(apacheDir, "logs").mkdirs();
+        new File(apacheDir, "htdocs").mkdirs();
+        File sslDir = new File(apacheDir, "ssl");
         sslDir.mkdirs();
-        audioDir.mkdirs();
-        sshDir.mkdirs();
+        new File(apacheDir, "axis2c/services/AudioSearchService").mkdirs();
+        new File(apacheDir, "axis2c/modules").mkdirs();
 
-        // Deploy SSL certs from assets if they exist and aren't already deployed
+        // Audio working dirs (unchanged)
+        new File(filesDir, "models").mkdirs();
+        new File(filesDir, "audio").mkdirs();
+        new File(filesDir, "ssh/keys").mkdirs();
+
+        // Certs go under the ServerRoot so ssl.conf's "ssl/server.crt" resolves.
         deploySslFromAssets(sslDir);
 
-        Log.i(TAG, "Files directory: " + filesDir.getAbsolutePath());
-        Log.i(TAG, "Models directory: " + modelsDir.getAbsolutePath());
+        // Apache configuration + Axis2/C repository
+        deployApacheConfig(apacheDir);
+
+        Log.i(TAG, "Apache ServerRoot: " + apacheDir.getAbsolutePath());
     }
 
     private void deploySslFromAssets(File sslDir) {
@@ -161,10 +180,84 @@ public class AudioService extends Service {
                     }
                 }
                 Log.i(TAG, "Deployed SSL: " + filename);
+                if (filename.endsWith(".key")) {
+                    // Private key: restrict to owner-only (defense in depth beyond
+                    // the app sandbox — matters on rooted devices). Clear all, then
+                    // grant owner read/write.
+                    target.setReadable(false, false);
+                    target.setWritable(false, false);
+                    target.setReadable(true, true);
+                    target.setWritable(true, true);
+                }
             } catch (IOException e) {
                 Log.d(TAG, "SSL asset not found (will need manual deploy): " + filename);
             }
         }
+    }
+
+    /**
+     * Deploy the Apache config set + Axis2/C repository from assets to the
+     * ServerRoot. httpd.conf and ssl.conf carry a {{KANAHA_HOSTNAME}} placeholder
+     * substituted with the device hostname (cosmetic ServerName).
+     */
+    private void deployApacheConfig(File apacheDir) {
+        File conf = new File(apacheDir, "conf");
+        String hostname = getHostname();
+        // Each deploy is independent so one missing/failed asset doesn't block the rest.
+        deployAssetWithHostname("apache/httpd.conf", new File(conf, "httpd.conf"), hostname);
+        deployAssetWithHostname("apache/ssl.conf", new File(conf, "ssl.conf"), hostname);
+        deployAsset("apache/http2-performance.conf", new File(conf, "http2-performance.conf"));
+        deployAsset("apache/axis2.conf", new File(conf, "axis2.conf"));
+        deployAsset("apache/mime.types", new File(conf, "mime.types"));
+        deployAsset("apache/htdocs/index.html", new File(apacheDir, "htdocs/index.html"));
+        deployAsset("axis2c/axis2.xml", new File(apacheDir, "axis2c/axis2.xml"));
+        deployAsset("axis2c/services/AudioSearchService/services.xml",
+            new File(apacheDir, "axis2c/services/AudioSearchService/services.xml"));
+        Log.i(TAG, "Apache configuration deployed (ServerName host: " + hostname + ")");
+    }
+
+    /** Copy an asset verbatim to a file; logs and continues if the asset is missing. */
+    private void deployAsset(String assetPath, File target) {
+        try {
+            target.getParentFile().mkdirs();
+            try (InputStream is = getAssets().open(assetPath);
+                 FileOutputStream fos = new FileOutputStream(target)) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = is.read(buf)) > 0) fos.write(buf, 0, n);
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to deploy asset: " + assetPath, e);
+        }
+    }
+
+    /** Copy a text asset to a file, substituting {{KANAHA_HOSTNAME}}; logs and continues on error. */
+    private void deployAssetWithHostname(String assetPath, File target, String hostname) {
+        try {
+            target.getParentFile().mkdirs();
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(
+                    getAssets().open(assetPath), java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) sb.append(line).append('\n');
+            }
+            String out = sb.toString().replace("{{KANAHA_HOSTNAME}}", hostname);
+            // Explicit UTF-8 to match the input charset (FileWriter would use the
+            // platform default).
+            try (java.io.Writer w = new java.io.OutputStreamWriter(
+                    new FileOutputStream(target), java.nio.charset.StandardCharsets.UTF_8)) {
+                w.write(out);
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to deploy asset: " + assetPath, e);
+        }
+    }
+
+    /** Cosmetic ServerName host; clients connect by IP, so the value need not resolve. */
+    private String getHostname() {
+        String model = android.os.Build.MODEL;
+        if (model == null || model.isEmpty()) return "kanaha-audio.local";
+        return model.replaceAll("[^A-Za-z0-9_-]", "-").toLowerCase() + ".local";
     }
 
     /**
@@ -197,27 +290,35 @@ public class AudioService extends Service {
         }
 
         File filesDir = getFilesDir();
+        File apacheDir = new File(filesDir, "apache");
         String modelsDir = new File(filesDir, "models").getAbsolutePath();
-        String sslDir = new File(filesDir, "ssl").getAbsolutePath();
+        String configPath = new File(apacheDir, "conf/httpd.conf").getAbsolutePath();
 
+        // Path B: launch the REAL Apache httpd (mod_http2 + mod_ssl + mod_axis2)
+        // so AudioSearchService is served over genuine HTTP/2 (ALPN h2). The
+        // packaged binary libkanaha_audio_httpd.so must now BE a real Apache build
+        // with AudioSearchService statically linked — see
+        // docs/PATH_B_HTTP2_MIGRATION.md. Apache args:
+        //   -f <httpd.conf>   -d <ServerRoot>   -X single-process mode for Android
         String[] command = {
             executablePath,
-            "-p", String.valueOf(SERVER_PORT),
-            "-m", modelsDir,
-            "-c", sslDir + "/server.crt",
-            "-k", sslDir + "/server.key",
-            "-a", sslDir + "/ca.crt"
+            "-f", configPath,
+            "-d", apacheDir.getAbsolutePath(),
+            "-X"
         };
 
         Log.i(TAG, "Launching: " + String.join(" ", command));
 
         ProcessBuilder pb = new ProcessBuilder(command);
-        pb.directory(filesDir);
+        pb.directory(apacheDir);
         pb.redirectErrorStream(true);
 
         java.util.Map<String, String> env = pb.environment();
         env.put("LD_LIBRARY_PATH", nativeLibDir);
         env.put("HOME", filesDir.getAbsolutePath());
+        // The Axis2/C AudioSearchService reads the whisper models directory from
+        // this env var (real Apache doesn't take the old -m flag).
+        env.put("KANAHA_AUDIO_MODELS", modelsDir);
 
         serverProcess = pb.start();
         Log.i(TAG, "Process started with PID: " + getProcessId(serverProcess));
@@ -234,7 +335,8 @@ public class AudioService extends Service {
             updateNotification("Running on port " + SERVER_PORT);
         } else {
             int exitCode = serverProcess.exitValue();
-            Log.e(TAG, "Server process exited with code: " + exitCode);
+            Log.e(TAG, "Server process exited with code: " + exitCode
+                + " — check native logs (Apache config error or port " + SERVER_PORT + " conflict)");
             updateNotification("Error: process exited (code " + exitCode + ")");
         }
     }

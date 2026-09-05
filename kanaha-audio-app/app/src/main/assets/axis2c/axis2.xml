@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Kanaha Audio - Axis2/C Configuration
+  HTTP/2 + mTLS + JSON-RPC AudioSearchService
+
+  Note: Message receivers / services are statically linked into httpd,
+  so we don't specify class= attributes to avoid dlopen.
+-->
+<axisconfig name="Kanaha/Axis2C">
+    <!-- Enable REST/JSON mode -->
+    <parameter name="enableREST" locked="false">true</parameter>
+
+    <!-- Service repository path (relative) -->
+    <parameter name="ServicesDirectory">services</parameter>
+
+    <!-- Module repository path (relative) -->
+    <parameter name="ModulesDirectory">modules</parameter>
+
+    <!-- Transport Receivers (statically linked - no class attribute = no dlopen) -->
+    <transportReceiver name="http">
+        <parameter name="port" locked="false">8443</parameter>
+        <parameter name="exposeHeaders" locked="true">false</parameter>
+    </transportReceiver>
+
+    <!-- Transport Senders (statically linked - no class attribute = no dlopen) -->
+    <transportSender name="http">
+        <parameter name="PROTOCOL" locked="false">HTTP/2.0</parameter>
+        <parameter name="xml-declaration" insert="false"/>
+    </transportSender>
+
+    <phaseOrder type="InFlow">
+        <phase name="Transport"/>
+        <phase name="Addressing"/>
+        <phase name="Security"/>
+        <phase name="PreDispatch"/>
+        <phase name="Dispatch"/>
+        <phase name="PostDispatch"/>
+    </phaseOrder>
+
+    <phaseOrder type="OutFlow">
+        <phase name="MessageOut"/>
+        <phase name="Security"/>
+        <phase name="Transport"/>
+    </phaseOrder>
+
+    <phaseOrder type="InFaultFlow">
+        <phase name="Transport"/>
+        <phase name="Addressing"/>
+        <phase name="PreDispatch"/>
+        <phase name="Dispatch"/>
+        <phase name="PostDispatch"/>
+    </phaseOrder>
+
+    <phaseOrder type="OutFaultFlow">
+        <phase name="MessageOut"/>
+        <phase name="Transport"/>
+    </phaseOrder>
+</axisconfig>

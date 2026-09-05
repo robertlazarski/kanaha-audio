@@ -164,7 +164,8 @@ All dependencies use permissive or weak-copyleft licenses. Code can flow upstrea
 | Document | Description |
 |----------|-------------|
 | [LEGAL.md](docs/LEGAL.md) | License analysis and compatibility |
-| [SECURITY.md](docs/SECURITY.md) | Security model (mTLS) |
+| [SECURITY.md](docs/SECURITY.md) | Security model (mTLS) + HTTP/2 DoS hardening (CVE-2026-49975) |
+| [PATH_B_HTTP2_MIGRATION.md](docs/PATH_B_HTTP2_MIGRATION.md) | How the server moved from a hand-rolled HTTP/1.1 server to real Apache + mod_http2 (genuine HTTP/2) |
 | [WHISPER_MODELS.md](docs/WHISPER_MODELS.md) | Model selection guide (sizes, RAM, English-only vs multilingual) |
 | [WHISPER_PERFORMANCE.md](docs/WHISPER_PERFORMANCE.md) | Performance expectations, workload sizing, implementation differences |
 | [EDL.md](docs/EDL.md) | EDL generation — automatic edit lists from audio cues (replaces parseLTC.sh magic values) |
