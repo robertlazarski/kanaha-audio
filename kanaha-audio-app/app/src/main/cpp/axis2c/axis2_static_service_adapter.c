@@ -38,6 +38,8 @@
 
 #include <json-c/json.h>
 #include <string.h>
+#include <stdlib.h>
+#include <pthread.h>
 
 #ifdef AXIS2_BUILD
 #include <axutil_env.h>
@@ -55,6 +57,28 @@ typedef struct axutil_env axutil_env_t;
 #define LOGI(...) fprintf(stderr, "[INFO] " __VA_ARGS__)
 #define LOGE(...) fprintf(stderr, "[ERROR] " __VA_ARGS__)
 #endif
+
+/* External: service lifecycle (from audio_search_service.c).
+ * Under Path B the old main() is gone, so nothing initialises the service
+ * subsystems -- whisper, recording, SFTP and YAMNet -- and every request that
+ * touches them fails with "not initialized". Apache forks its child before any
+ * request arrives, so we initialise lazily on first dispatch rather than at
+ * load time, and exactly once per process. */
+extern int audio_search_service_init(const char *models_dir);
+
+static pthread_once_t kanaha_audio_init_once = PTHREAD_ONCE_INIT;
+
+static void kanaha_audio_init_locked(void)
+{
+    const char *models_dir = getenv("KANAHA_AUDIO_MODELS");
+    if (!models_dir || !*models_dir) {
+        LOGE("KANAHA_AUDIO_MODELS is unset -- recording, whisper and SFTP "
+             "will report 'not initialized'. AudioService.java sets it.");
+        return;
+    }
+    LOGI("Initialising audio service subsystems from %s", models_dir);
+    audio_search_service_init(models_dir);
+}
 
 /* External: application service implementation (from audio_search_service.c) */
 extern int audio_search_service_invoke_json_impl(
@@ -81,6 +105,8 @@ json_object *audio_search_service_invoke_json(
     json_object *json_request)
 {
     (void)env;  /* Not needed — Android services use action-based dispatch */
+
+    pthread_once(&kanaha_audio_init_once, kanaha_audio_init_locked);
 
     if (!json_request) {
         LOGE("audio_search_service_invoke_json: NULL request");
