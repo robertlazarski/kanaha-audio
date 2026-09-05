@@ -120,8 +120,13 @@ No Intent IPC needed (unlike [Kanaha Camera](https://github.com/robertlazarski/k
 Kanaha Audio exposes all 14 operations as MCP tools, so Claude can record audio, search for keywords, detect instruments, and decode timecode directly. See [MCP.md](https://github.com/robertlazarski/kanaha-audio/blob/main/docs/MCP.md) for Claude Desktop configuration.
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | /data/data/org.kanaha.audio/files/kanaha-audio-mcp
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | \
+  adb -s 192.168.8.126:5555 shell run-as org.kanaha.audio ./files/kanaha-audio-mcp
 ```
+
+`run-as` is required, not optional: the app data directory is `drwx------`, so
+the adb shell user has no traversal into it wherever the binary sits. Works the
+same over WiFi (`adb connect <ip>:5555`) as over USB.
 
 Also useful for finding misplaced phones. During development, a Pixel went missing. "Claude, find my phone" → Claude called `playTone` in a loop until the 1kHz beep was traced to a couch cushion. Not its intended purpose, but `playTone` doesn't judge.
 

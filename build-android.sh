@@ -114,16 +114,21 @@ echo "--- Linking ---"
 echo "=== httpd build complete ==="
 ls -lh "$BUILD/kanaha-audio-httpd"
 
-# Strip and install into jniLibs, where Android loads it from. Without this the
-# app keeps running whatever .so was there before and a successful build looks
-# like a successful deploy.
 STRIP=$TOOLCHAIN/bin/llvm-strip
 OUTPUT_DIR=$HOME/repos/kanaha-audio/kanaha-audio-app/app/src/main/jniLibs/arm64-v8a
-"$STRIP" "$BUILD/kanaha-audio-httpd"
 mkdir -p "$OUTPUT_DIR"
-cp "$BUILD/kanaha-audio-httpd" "$OUTPUT_DIR/libkanaha_audio_httpd.so"
-echo "=== Installed: $OUTPUT_DIR/libkanaha_audio_httpd.so ==="
-ls -la "$OUTPUT_DIR/libkanaha_audio_httpd.so"
+
+# NOTE: kanaha-audio-httpd is NOT installed into jniLibs.
+#
+# It is the old hand-rolled OpenSSL server (apache_httpd_android.c), kept only
+# as a desktop test CLI. The app is served by real Apache, built separately by
+# build-httpd-audio.sh, which writes the same libkanaha_audio_httpd.so path.
+#
+# This script used to copy it over that file. The result was an app that had
+# silently reverted to HTTP/1.1 with a server rejecting the Apache arguments
+# AudioService passes it -- and because the .so is gitignored, nothing recorded
+# the swap. If you want to refresh the app server, run build-httpd-audio.sh.
+echo "=== httpd built at $BUILD/kanaha-audio-httpd (desktop CLI; not installed) ==="
 
 # Build MCP binary (Claude Desktop stdio transport)
 echo ""
@@ -172,6 +177,13 @@ echo "--- Linking MCP binary ---"
     -llog -lz -lm -ldl \
     -static-libstdc++ \
     -o "$BUILD/kanaha-audio-mcp"
+
+# Install the MCP binary. Claude reaches it over adb stdio, so it has to ship
+# inside the APK as a lib/ entry -- the manifest sets extractNativeLibs="true",
+# which is what makes it a real executable file on disk rather than an mmap.
+"$STRIP" "$BUILD/kanaha-audio-mcp"
+cp "$BUILD/kanaha-audio-mcp" "$OUTPUT_DIR/libkanaha_mcp.so"
+echo "=== Installed: $OUTPUT_DIR/libkanaha_mcp.so ==="
 
 echo "=== Build complete ==="
 ls -lh "$BUILD/kanaha-audio-httpd" "$BUILD/kanaha-audio-mcp"

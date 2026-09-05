@@ -156,6 +156,8 @@ public class AudioService extends Service {
         new File(filesDir, "audio").mkdirs();
         new File(filesDir, "ssh/keys").mkdirs();
 
+        deployMcpBinary(filesDir);
+
         // Certs go under the ServerRoot so ssl.conf's "ssl/server.crt" resolves.
         deploySslFromAssets(sslDir);
 
@@ -416,6 +418,44 @@ public class AudioService extends Service {
     private void updateNotification(String text) {
         getSystemService(NotificationManager.class)
             .notify(NOTIFICATION_ID, createNotification(text));
+    }
+
+    /**
+     * Copy the MCP binary out of the APK's native lib directory into filesDir,
+     * so Claude can be pointed at a path that survives reinstalls.
+     *
+     * The packaged location under /data/app carries a random hash that changes
+     * every time the app is installed, which makes it useless in a static
+     * Claude Desktop config. This copy is stable.
+     *
+     * Note the caller still needs "run-as": the app data directory is
+     * drwx------, so the adb shell user (uid 2000) has no traversal into it at
+     * all, wherever the binary happens to sit.
+     */
+    private void deployMcpBinary(File filesDir) {
+        File src = new File(getApplicationInfo().nativeLibraryDir, "libkanaha_mcp.so");
+        File dst = new File(filesDir, "kanaha-audio-mcp");
+        if (!src.exists()) {
+            Log.w(TAG, "MCP binary not packaged: " + src);
+            return;
+        }
+        if (dst.exists() && dst.length() == src.length()) {
+            return;  // already current
+        }
+        try (java.io.InputStream in = new java.io.FileInputStream(src);
+             java.io.OutputStream out = new java.io.FileOutputStream(dst)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        }
+        catch (java.io.IOException e) {
+            Log.e(TAG, "Failed to deploy MCP binary", e);
+            return;
+        }
+        if (!dst.setExecutable(true, true)) {
+            Log.w(TAG, "Could not mark MCP binary executable: " + dst);
+        }
+        Log.i(TAG, "MCP binary deployed: " + dst.getAbsolutePath());
     }
 
     private void acquireWakeLock() {

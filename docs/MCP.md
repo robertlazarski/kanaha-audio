@@ -14,7 +14,7 @@ Claude Desktop (or any MCP client)
     ├─ JSON-RPC 2.0 over stdio
     │
     ▼
-kanaha-audio-mcp (98 KB native binary)
+kanaha-audio-mcp (11 MB native binary: whisper.cpp + TFLite statically linked)
     │
     ├─ initialize    → protocol handshake
     ├─ tools/list    → 14 audio tool catalog
@@ -58,7 +58,8 @@ Add to `~/.config/claude/claude_desktop_config.json`:
       "command": "adb",
       "args": [
         "shell",
-        "/data/data/org.kanaha.audio/files/kanaha-audio-mcp"
+        "run-as", "org.kanaha.audio",
+        "./files/kanaha-audio-mcp"
       ]
     }
   }
@@ -73,9 +74,10 @@ For a specific device (when multiple phones are connected):
     "kanaha-audio-moto": {
       "command": "adb",
       "args": [
-        "-s", "ZY224HBVQF",
+        "-s", "192.168.8.126:5555",
         "shell",
-        "/data/data/org.kanaha.audio/files/kanaha-audio-mcp"
+        "run-as", "org.kanaha.audio",
+        "./files/kanaha-audio-mcp"
       ]
     }
   }
@@ -115,39 +117,39 @@ Transport: JSON-RPC 2.0 over stdio (newline-delimited)
 ```bash
 # List available tools
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | \
-  adb shell /data/data/org.kanaha.audio/files/kanaha-audio-mcp
+  adb shell run-as org.kanaha.audio ./files/kanaha-audio-mcp
 
 # Load whisper model
 echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"loadModel","arguments":{"model":"base.en"}}}' | \
-  adb shell /data/data/org.kanaha.audio/files/kanaha-audio-mcp
+  adb shell run-as org.kanaha.audio ./files/kanaha-audio-mcp
 
 # Start recording
 echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"startRecording","arguments":{"clip_name":"meeting","sample_rate":16000}}}' | \
-  adb shell /data/data/org.kanaha.audio/files/kanaha-audio-mcp
+  adb shell run-as org.kanaha.audio ./files/kanaha-audio-mcp
 
 # ... wait ...
 
 # Stop recording
 echo '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"stopRecording","arguments":{}}}' | \
-  adb shell /data/data/org.kanaha.audio/files/kanaha-audio-mcp
+  adb shell run-as org.kanaha.audio ./files/kanaha-audio-mcp
 
 # Search for keywords
 echo '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"searchKeywords","arguments":{"audio_file":"/data/data/org.kanaha.audio/files/audio/meeting.wav","keywords":["next slide please"]}}}' | \
-  adb shell /data/data/org.kanaha.audio/files/kanaha-audio-mcp
+  adb shell run-as org.kanaha.audio ./files/kanaha-audio-mcp
 ```
 
 ### Decode SMPTE timecode
 
 ```bash
 echo '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"decodeLTC","arguments":{"audio_file":"/data/data/org.kanaha.audio/files/audio/tentacle_smpte.wav"}}}' | \
-  adb shell /data/data/org.kanaha.audio/files/kanaha-audio-mcp
+  adb shell run-as org.kanaha.audio ./files/kanaha-audio-mcp
 ```
 
 ### Detect instruments
 
 ```bash
 echo '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"detectAudioEvents","arguments":{"audio_file":"/data/data/org.kanaha.audio/files/audio/room.wav","events":["Saxophone","Drum","Speech","Music"]}}}' | \
-  adb shell /data/data/org.kanaha.audio/files/kanaha-audio-mcp
+  adb shell run-as org.kanaha.audio ./files/kanaha-audio-mcp
 ```
 
 ## Multi-Device MCP
