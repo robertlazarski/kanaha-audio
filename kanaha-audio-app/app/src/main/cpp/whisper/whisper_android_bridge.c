@@ -98,7 +98,22 @@ static struct whisper_context *g_whisper_ctx = NULL;  /* The loaded whisper mode
  * running any inference operations.
  * ======================================================================== */
 
+/* whisper.cpp and ggml log through their own callback, which defaults to
+ * stderr -- and stderr goes nowhere under Android. Without this, failures
+ * inside the library are simply invisible: DTW alignment can fail to
+ * initialise and the only symptom is t_dtw coming back as -1 on every token. */
+static void whisper_log_to_android(enum ggml_log_level level, const char *text, void *user_data) {
+    (void)user_data;
+    if (!text || !*text) return;
+    int prio = (level == GGML_LOG_LEVEL_ERROR) ? ANDROID_LOG_ERROR
+             : (level == GGML_LOG_LEVEL_WARN)  ? ANDROID_LOG_WARN
+             : ANDROID_LOG_INFO;
+    __android_log_print(prio, "WhisperCpp", "%s", text);
+}
+
 int whisper_bridge_init(const char *models_dir) {
+    whisper_log_set(whisper_log_to_android, NULL);
+
     if (!models_dir) {
         LOGE("whisper_bridge_init: models_dir is NULL");
         return -1;
@@ -184,6 +199,30 @@ int whisper_bridge_load_model(const char *model_name) {
      * operation — for the "base" model, expect ~500 MB of RAM usage.
      */
     struct whisper_context_params cparams = whisper_context_default_params();
+
+    /* DTW token-level timestamps.
+     *
+     * Without this, whisper's token t0/t1 are heuristic and effectively useless
+     * for cueing: a short phrase inside a long quiet stretch comes back as one
+     * segment with the tokens smeared across it -- "next slide please" in 28.9 s
+     * of room tone reported 0-16950 ms, a 17-second window.
+     *
+     * DTW aligns tokens against the encoder's cross-attention instead, which is
+     * what makes a match usable as an edit cue. The aheads preset must match the
+     * model; we only ship base.en, so it is selected directly rather than
+     * inferred. If a different model is ever added, this needs a lookup, and a
+     * mismatched preset degrades alignment silently. */
+    cparams.dtw_token_timestamps = true;
+    cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
+
+    /* whisper.cpp silently disables DTW when flash attention is on --
+     *   "dtw_token_timestamps is not supported with flash_attn - disabling"
+     * logged through its own callback, which is why the log is routed to
+     * logcat above. Leaving flash_attn at its default made every token come
+     * back with t_dtw = -1 and the coarse heuristic timestamps stood in
+     * unnoticed. DTW is the point here, so flash attention gives way. */
+    cparams.flash_attn = false;
+
     g_whisper_ctx = whisper_init_from_file_with_params(model_path, cparams);
 
     if (!g_whisper_ctx) {
@@ -363,6 +402,7 @@ int whisper_bridge_search_keywords(
         char word[128];         /* Cleaned word for matching */
         int64_t t0;             /* Start time in milliseconds */
         int64_t t1;             /* End time in milliseconds */
+        int64_t t_dtw;          /* DTW-aligned instant, ms; -1 when unavailable */
         float p;                /* Token probability from whisper */
     } token_info_t;
 
@@ -398,6 +438,9 @@ int whisper_bridge_search_keywords(
             /* Convert whisper's 10ms units to milliseconds */
             tokens[total_tokens].t0 = tdata.t0 * 10;
             tokens[total_tokens].t1 = tdata.t1 * 10;
+            /* t_dtw is -1 when DTW alignment did not produce a value for this
+             * token; keep the sentinel rather than scaling it into a real time. */
+            tokens[total_tokens].t_dtw = (tdata.t_dtw < 0) ? -1 : tdata.t_dtw * 10;
             tokens[total_tokens].p  = tdata.p;
 
             total_tokens++;
@@ -454,9 +497,23 @@ int whisper_bridge_search_keywords(
                 strncpy(m->keyword, keywords[kw_idx], sizeof(m->keyword) - 1);
                 m->keyword[sizeof(m->keyword) - 1] = '\0';
 
-                /* Timestamp span: first token's start to last token's end */
-                m->start_ms = tokens[i].t0;
-                m->end_ms   = tokens[i + kw_word_count - 1].t1;
+                /* Timestamp span: first token's start to last token's end.
+                 *
+                 * Prefer the DTW instants when alignment produced them. The
+                 * heuristic t0/t1 smear a short phrase across its whole segment
+                 * -- a phrase in room tone came back as a 17-second window --
+                 * which is useless as an edit cue. Fall back to t0/t1 when DTW
+                 * is unavailable, so behaviour degrades rather than breaking. */
+                int64_t dtw_first = tokens[i].t_dtw;
+                int64_t dtw_last  = tokens[i + kw_word_count - 1].t_dtw;
+                if (dtw_first >= 0 && dtw_last >= dtw_first) {
+                    m->start_ms = dtw_first;
+                    m->end_ms   = dtw_last;
+                }
+                else {
+                    m->start_ms = tokens[i].t0;
+                    m->end_ms   = tokens[i + kw_word_count - 1].t1;
+                }
 
                 /* Confidence = average probability across all matched tokens */
                 float sum_p = 0.0f;
