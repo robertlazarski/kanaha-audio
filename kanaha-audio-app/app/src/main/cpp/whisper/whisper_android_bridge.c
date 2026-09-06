@@ -818,8 +818,17 @@ int whisper_bridge_list_audio_files(
 
     /* Build JSON array incrementally using snprintf with offset tracking */
     size_t offset = 0;
-    offset += snprintf(json_buffer + offset, buffer_size - offset,
-                       "{\"files\":[");
+    /* Clamp even the prefix: on an absurdly small buffer an unchecked
+     * offset += snprintf() would exceed buffer_size and underflow every
+     * later buffer_size - offset. */
+    {
+        int pw = snprintf(json_buffer + offset, buffer_size - offset, "{\"files\":[");
+        if (pw < 0 || (size_t)pw >= buffer_size) {
+            closedir(dir);   /* opened just above -- do not leak the fd */
+            return -1;
+        }
+        offset += (size_t)pw;
+    }
 
     int first = 1;
     struct dirent *entry;
