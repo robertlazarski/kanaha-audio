@@ -648,13 +648,18 @@ int audio_search_service_invoke_json_impl(
         char dir[512] = "";
         extract_json_string(json_request, "directory", dir, sizeof(dir));
 
-        /* Default to app's audio directory. If user provides a directory,
-         * reject path traversal. We always use the default path to prevent
-         * arbitrary directory listing outside the app sandbox. */
-        if (strlen(dir) == 0 || strstr(dir, "..")) {
-            snprintf(dir, sizeof(dir),
-                     "/data/data/org.kanaha.audio/files/audio");
+        /* Only the app's own audio directory may be listed. The previous
+         * comment here claimed that already; the code only fell back to the
+         * default on ".." and otherwise listed any absolute path, including
+         * files/ssh/keys. The parameter is kept for schema compatibility but
+         * anything other than the default is refused. */
+        static const char *default_dir = "/data/data/org.kanaha.audio/files/audio";
+        if (strlen(dir) != 0 && strcmp(dir, default_dir) != 0) {
+            create_error_response(json_response, response_size,
+                "listAudioFiles: only the app audio directory may be listed");
+            return -1;
         }
+        snprintf(dir, sizeof(dir), "%s", default_dir);
 
         int rc = whisper_bridge_list_audio_files(dir, json_response, response_size);
 
@@ -947,8 +952,13 @@ int audio_search_service_invoke_json_impl(
             return -1;
         }
 
-        snprintf(json_response, response_size,
-            "{\"success\":true,\"audio_file\":\"%s\"}", audio_file);
+        {
+            char *escaped_file = json_escape_string(audio_file);
+            snprintf(json_response, response_size,
+                "{\"success\":true,\"audio_file\":\"%s\"}",
+                escaped_file ? escaped_file : "");
+            free(escaped_file);
+        }
     }
     /* ================================================================
      * listRecordings - List WAV files in the audio directory
@@ -1018,9 +1028,12 @@ int audio_search_service_invoke_json_impl(
             if (count > 0) {
                 offset = safe_snprintf(json_response, response_size, offset, ",");
             }
+            char *escaped_name = json_escape_string(entry->d_name);
             offset = safe_snprintf(json_response, response_size, offset,
                 "{\"name\":\"%s\",\"size_bytes\":%lld,\"duration_ms\":%lld}",
-                entry->d_name, (long long)st.st_size, (long long)est_duration_ms);
+                escaped_name ? escaped_name : "", (long long)st.st_size,
+                (long long)est_duration_ms);
+            free(escaped_name);
             count++;
         }
         closedir(dir);
@@ -1158,8 +1171,19 @@ int audio_search_service_invoke_json_impl(
      * Unknown action
      * ================================================================ */
     else {
+        /* The action name is echoed back; keep it to a safe alphabet so a
+         * quote or backslash in it cannot break the JSON it lands in. */
+        char safe_action[64];
+        size_t n = 0;
+        for (const char *p = action; *p && n < sizeof(safe_action) - 1; p++) {
+            char c = *p;
+            int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                     (c >= '0' && c <= '9') || c == '_' || c == '-';
+            safe_action[n++] = ok ? c : '?';
+        }
+        safe_action[n] = '\0';
         char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Unknown action: %s", action);
+        snprintf(error_msg, sizeof(error_msg), "Unknown action: %s", safe_action);
         create_error_response(json_response, response_size, error_msg);
         return -1;
     }
