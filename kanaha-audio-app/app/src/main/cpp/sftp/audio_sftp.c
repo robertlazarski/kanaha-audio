@@ -239,34 +239,64 @@ static int ssh_connect(const char *host, int port, const char *username,
     char known_hosts_path[1024];
     snprintf(known_hosts_path, sizeof(known_hosts_path), "%s/known_hosts", s_ssh_dir);
 
+    /* Host key verification fails closed. Previously a missing or empty
+     * known_hosts, or a host simply not listed in it, was logged at DEBUG and
+     * the transfer went ahead -- so any LAN peer answering for the server's
+     * address received the recordings. Now the server must be present in
+     * files/ssh/known_hosts (OpenSSH format) or the connection is refused. */
     LIBSSH2_KNOWNHOSTS *nh = libssh2_knownhost_init(session);
-    if (nh) {
-        libssh2_knownhost_readfile(nh, known_hosts_path,
-                                   LIBSSH2_KNOWNHOST_FILE_OPENSSH);
+    if (!nh) {
+        LOGE("known_hosts: cannot initialise host key store");
+        libssh2_session_disconnect(session, "Host key store unavailable");
+        libssh2_session_free(session);
+        close(sock);
+        return -1;
+    }
+    {
+        int loaded = libssh2_knownhost_readfile(nh, known_hosts_path,
+                                                LIBSSH2_KNOWNHOST_FILE_OPENSSH);
+        if (loaded < 0) {
+            LOGE("known_hosts: cannot read %s (rc=%d); refusing to connect",
+                 known_hosts_path, loaded);
+            libssh2_knownhost_free(nh);
+            libssh2_session_disconnect(session, "known_hosts unreadable");
+            libssh2_session_free(session);
+            close(sock);
+            return -1;
+        }
 
         size_t fingerprint_len;
         int type;
         const char *fingerprint = libssh2_session_hostkey(session,
                                                           &fingerprint_len, &type);
-        if (fingerprint) {
-            int check = libssh2_knownhost_checkp(nh, host, port,
-                                                 fingerprint, fingerprint_len,
-                                                 LIBSSH2_KNOWNHOST_TYPE_PLAIN |
-                                                 LIBSSH2_KNOWNHOST_KEYENC_RAW,
-                                                 NULL);
-            if (check == LIBSSH2_KNOWNHOST_CHECK_MATCH) {
-                LOGI("known_hosts: server verified");
-            } else if (check == LIBSSH2_KNOWNHOST_CHECK_NOTFOUND) {
-                LOGD("known_hosts: server not in file (proceeding)");
-            } else {
-                LOGE("known_hosts: server key MISMATCH (check=%d)", check);
-                libssh2_knownhost_free(nh);
-                libssh2_session_disconnect(session, "Host key mismatch");
-                libssh2_session_free(session);
-                close(sock);
-                return -1;
-            }
+        if (!fingerprint) {
+            LOGE("known_hosts: server presented no host key");
+            libssh2_knownhost_free(nh);
+            libssh2_session_disconnect(session, "No host key");
+            libssh2_session_free(session);
+            close(sock);
+            return -1;
         }
+
+        int check = libssh2_knownhost_checkp(nh, host, port,
+                                             fingerprint, fingerprint_len,
+                                             LIBSSH2_KNOWNHOST_TYPE_PLAIN |
+                                             LIBSSH2_KNOWNHOST_KEYENC_RAW,
+                                             NULL);
+        if (check != LIBSSH2_KNOWNHOST_CHECK_MATCH) {
+            if (check == LIBSSH2_KNOWNHOST_CHECK_NOTFOUND)
+                LOGE("known_hosts: %s:%d is not listed in %s; refusing to connect",
+                     host, port, known_hosts_path);
+            else
+                LOGE("known_hosts: server key MISMATCH for %s:%d (check=%d)",
+                     host, port, check);
+            libssh2_knownhost_free(nh);
+            libssh2_session_disconnect(session, "Host key not trusted");
+            libssh2_session_free(session);
+            close(sock);
+            return -1;
+        }
+        LOGI("known_hosts: server verified");
         libssh2_knownhost_free(nh);
     }
 
