@@ -48,6 +48,7 @@
 
 #ifdef __ANDROID__
 #include <android/log.h>
+#include <pthread.h>
 #define LOG_TAG "YAMNetBridge"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -167,7 +168,7 @@ int yamnet_bridge_init(const char *model_path) {
     return 0;
 }
 
-void yamnet_bridge_cleanup(void) {
+static void yamnet_bridge_cleanup_unlocked(void) {
     LOGI("YAMNet bridge cleanup");
 
     if (g_interpreter) {
@@ -181,7 +182,7 @@ void yamnet_bridge_cleanup(void) {
     g_initialized = 0;
 }
 
-int yamnet_bridge_is_ready(void) {
+static int yamnet_bridge_is_ready_unlocked(void) {
     return g_initialized && g_interpreter != NULL;
 }
 
@@ -215,7 +216,7 @@ int yamnet_bridge_is_ready(void) {
  *   where hop_ms = 500ms, frame_ms = 975ms
  * ======================================================================== */
 
-int yamnet_bridge_detect(
+static int yamnet_bridge_detect_unlocked(
     const char *audio_file,
     const char **events,
     int num_events,
@@ -316,6 +317,17 @@ int yamnet_bridge_detect(
     if (time_range_end >= 0.0f) {
         end_sample = (int)(time_range_end * sample_rate);
         if (end_sample > n_samples) end_sample = n_samples;
+    }
+
+    /* The range is fed to TfLiteTensorCopyFromBuffer() as a pointer offset
+     * and a byte count. A negative start reads before the buffer; an
+     * inverted range produces a negative length. Neither can be allowed
+     * through regardless of how the values were derived. */
+    if (start_sample < 0 || end_sample > n_samples || end_sample <= start_sample) {
+        LOGE("Invalid sample range [%d, %d) for %d samples",
+             start_sample, end_sample, n_samples);
+        free(pcmf32);
+        return -1;
     }
 
     /*
@@ -500,4 +512,33 @@ int yamnet_bridge_detect(
          (long long)result->processing_time_ms);
 
     return 0;
+}
+
+/* One TfLiteInterpreter, shared. ResizeInputTensor / AllocateTensors / Invoke
+ * are not safe to run concurrently on it, and the server has four worker
+ * threads. See the matching note in whisper_android_bridge.c. */
+static pthread_mutex_t g_yamnet_lock = PTHREAD_MUTEX_INITIALIZER;
+
+int yamnet_bridge_detect(const char *audio_file, const char **events, int num_events,
+                         float threshold, const char *mode,
+                         float time_range_start, float time_range_end,
+                         yamnet_detect_result_t *result) {
+    pthread_mutex_lock(&g_yamnet_lock);
+    int rc = yamnet_bridge_detect_unlocked(audio_file, events, num_events, threshold, mode,
+                                           time_range_start, time_range_end, result);
+    pthread_mutex_unlock(&g_yamnet_lock);
+    return rc;
+}
+
+void yamnet_bridge_cleanup(void) {
+    pthread_mutex_lock(&g_yamnet_lock);
+    yamnet_bridge_cleanup_unlocked();
+    pthread_mutex_unlock(&g_yamnet_lock);
+}
+
+int yamnet_bridge_is_ready(void) {
+    pthread_mutex_lock(&g_yamnet_lock);
+    int rc = yamnet_bridge_is_ready_unlocked();
+    pthread_mutex_unlock(&g_yamnet_lock);
+    return rc;
 }
