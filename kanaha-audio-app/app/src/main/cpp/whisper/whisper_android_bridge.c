@@ -58,6 +58,7 @@
 
 #ifdef __ANDROID__
 #include <android/log.h>
+#include <pthread.h>
 #define LOG_TAG "WhisperBridge"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -129,7 +130,7 @@ int whisper_bridge_init(const char *models_dir) {
     return 0;
 }
 
-void whisper_bridge_cleanup(void) {
+static void whisper_bridge_cleanup_unlocked(void) {
     LOGI("Whisper bridge cleanup");
 
     if (g_whisper_ctx) {
@@ -155,7 +156,7 @@ void whisper_bridge_cleanup(void) {
  *   - medium: ~2.6 GB RAM, high accuracy but slow
  * ======================================================================== */
 
-int whisper_bridge_load_model(const char *model_name) {
+static int whisper_bridge_load_model_unlocked(const char *model_name) {
     if (!g_initialized) {
         LOGE("Whisper bridge not initialized");
         return -1;
@@ -307,7 +308,7 @@ static void strip_for_matching(const char *input, char *output, size_t out_size)
  *   for parseLTC.sh third-camera priority windows.
  * ======================================================================== */
 
-int whisper_bridge_search_keywords(
+static int whisper_bridge_search_keywords_unlocked(
     const char *audio_file,
     const char **keywords,
     int num_keywords,
@@ -556,7 +557,7 @@ int whisper_bridge_search_keywords(
  * any partial allocations before returning.
  * ======================================================================== */
 
-int whisper_bridge_transcribe(
+static int whisper_bridge_transcribe_unlocked(
     const char *audio_file,
     whisper_transcribe_result_t *result
 ) {
@@ -678,7 +679,7 @@ int whisper_bridge_transcribe(
  * Status — returns JSON with bridge state for the getStatus API
  * ======================================================================== */
 
-int whisper_bridge_get_status(char *json_buffer, size_t buffer_size) {
+static int whisper_bridge_get_status_unlocked(char *json_buffer, size_t buffer_size) {
     if (!json_buffer || buffer_size == 0) return -1;
 
     snprintf(json_buffer, buffer_size,
@@ -704,7 +705,7 @@ int whisper_bridge_get_status(char *json_buffer, size_t buffer_size) {
  * it's the currently loaded model.
  * ======================================================================== */
 
-int whisper_bridge_list_models(whisper_model_info_t *models, int max_models) {
+static int whisper_bridge_list_models_unlocked(whisper_model_info_t *models, int max_models) {
     if (!g_initialized || !models || max_models <= 0) return -1;
 
     DIR *dir = opendir(g_models_dir);
@@ -820,4 +821,63 @@ int whisper_bridge_list_audio_files(
 
     snprintf(json_buffer + offset, buffer_size - offset, "]}");
     return 0;
+}
+
+/* ========================================================================
+ * Locking
+ *
+ * Everything above assumes one caller at a time -- the comments still say
+ * "the server is single-threaded". That was true of the superseded custom
+ * server. The shipped server is Apache with ThreadsPerChild 4, and mod_axis2
+ * does not serialise service invocations, so two connections can run
+ * whisper_full() on the same context at once, and loadModel can
+ * whisper_free() a context another thread is still inferring on.
+ *
+ * One mutex around every entry point that touches g_whisper_ctx or the model
+ * bookkeeping. Requests queue; a getStatus waits behind a transcribe. That is
+ * the correct trade for a single shared model on a phone.
+ * ======================================================================== */
+
+static pthread_mutex_t g_whisper_lock = PTHREAD_MUTEX_INITIALIZER;
+
+int whisper_bridge_load_model(const char *model_name) {
+    pthread_mutex_lock(&g_whisper_lock);
+    int rc = whisper_bridge_load_model_unlocked(model_name);
+    pthread_mutex_unlock(&g_whisper_lock);
+    return rc;
+}
+
+int whisper_bridge_search_keywords(const char *audio_file, const char **keywords,
+                                   int num_keywords, whisper_search_result_t *result) {
+    pthread_mutex_lock(&g_whisper_lock);
+    int rc = whisper_bridge_search_keywords_unlocked(audio_file, keywords, num_keywords, result);
+    pthread_mutex_unlock(&g_whisper_lock);
+    return rc;
+}
+
+int whisper_bridge_transcribe(const char *audio_file, whisper_transcribe_result_t *result) {
+    pthread_mutex_lock(&g_whisper_lock);
+    int rc = whisper_bridge_transcribe_unlocked(audio_file, result);
+    pthread_mutex_unlock(&g_whisper_lock);
+    return rc;
+}
+
+int whisper_bridge_get_status(char *json_buffer, size_t buffer_size) {
+    pthread_mutex_lock(&g_whisper_lock);
+    int rc = whisper_bridge_get_status_unlocked(json_buffer, buffer_size);
+    pthread_mutex_unlock(&g_whisper_lock);
+    return rc;
+}
+
+int whisper_bridge_list_models(whisper_model_info_t *models, int max_models) {
+    pthread_mutex_lock(&g_whisper_lock);
+    int rc = whisper_bridge_list_models_unlocked(models, max_models);
+    pthread_mutex_unlock(&g_whisper_lock);
+    return rc;
+}
+
+void whisper_bridge_cleanup(void) {
+    pthread_mutex_lock(&g_whisper_lock);
+    whisper_bridge_cleanup_unlocked();
+    pthread_mutex_unlock(&g_whisper_lock);
 }
