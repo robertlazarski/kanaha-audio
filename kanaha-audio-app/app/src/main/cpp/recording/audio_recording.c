@@ -375,6 +375,19 @@ void audio_recording_cleanup(void) {
  * Returns 0 on success, -1 on error (resets state to IDLE).
  */
 static int recording_start_impl(void) {
+    /* Atomically claim ACTIVE from SCHEDULED. The caller (immediate path or the
+     * scheduler thread) left the slot in SCHEDULED. If a concurrent stop()
+     * cancelled us (SCHEDULED->IDLE) in the window since the caller's check,
+     * this CAS fails and we start nothing -- closing the start-vs-cancel race
+     * that a plain "check then unconditionally store ACTIVE" left open. */
+    {
+        int expected = AUDIO_RECORDING_SCHEDULED;
+        if (!atomic_compare_exchange_strong(&s_state, &expected, AUDIO_RECORDING_ACTIVE)) {
+            LOGE("recording_start_impl: slot no longer SCHEDULED (state=%d) -- cancelled", expected);
+            return -1;
+        }
+    }
+
     /* Record actual start time */
     struct timespec start_ts;
     clock_gettime(CLOCK_REALTIME, &start_ts);
@@ -394,8 +407,7 @@ static int recording_start_impl(void) {
     atomic_store(&s_ring.tail, 0);
     s_total_samples_written = 0;
 
-    /* Mark active before starting stream and writer */
-    atomic_store(&s_state, AUDIO_RECORDING_ACTIVE);
+    /* State is already ACTIVE (claimed by CAS at the top of this function). */
 
     /* Start writer thread */
     s_writer_running = 1;
@@ -537,6 +549,10 @@ int audio_recording_start(const char *clip_name, int sample_rate, int64_t start_
     }
 
     /* Validate clip_name: reject path traversal */
+    if (strpbrk(clip_name, "\"\\\n\r\t") != NULL) {
+        LOGE("clip_name contains an unsafe character");
+        return -1;
+    }
     if (strstr(clip_name, "..") || strchr(clip_name, '/')) {
         LOGE("Invalid clip_name (path traversal rejected)");
         return -1;
