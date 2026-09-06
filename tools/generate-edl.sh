@@ -99,7 +99,9 @@ echo ""
 ka_curl() {
     local action="$1"
     local data="$2"
-    # -k: skip hostname verification (self-signed cert CN doesn't include device IP)
+    # WARNING: -k disables peer AND hostname verification (--cacert is inert here);
+    # a LAN peer can impersonate the phone. Known gap, see SECURITY.md. Fix needs
+    # server certs with an IP SAN. Left as -k pending that cert change.
     curl -sk --http2 --max-time "$CURL_TIMEOUT" \
         --cert "$SSL_DIR/client.crt" \
         --key "$SSL_DIR/client.key" \

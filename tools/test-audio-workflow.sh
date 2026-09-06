@@ -117,8 +117,11 @@ audio_api() {
     local action=$1
     local data=$2
     local timeout=${3:-15}
-    # -k: skip hostname verification (self-signed cert CN doesn't include device IP)
-    # --cacert: still verifies the CA chain — not disabling TLS, just hostname matching
+    # WARNING: -k disables BOTH peer and hostname verification, so --cacert here
+    # is inert and a LAN peer can impersonate the phone to this script. This is a
+    # known gap (see SECURITY.md). Proper fix: reissue server certs with an IP
+    # subjectAltName and drop -k, or use --connect-to kanaha-camera:PORT:IP:PORT
+    # against a CN-matching URL. Left as -k pending that cert change.
     curl -sk --http2 --max-time "$timeout" \
         --cert "$SSL/client.crt" --key "$SSL/client.key" --cacert "$SSL/ca.crt" \
         -H "Content-Type: application/json" \
