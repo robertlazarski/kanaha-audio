@@ -150,6 +150,24 @@ int ltc_decode_wav(const char *wav_path, int channel, ltc_decode_result_t *resul
         return -1;
     }
 
+    /* read_buf below is sized for at most two channels. The channel count
+     * comes straight from the file's fmt chunk, so a WAV declaring more
+     * channels than that would make fread() write past the end of a stack
+     * buffer -- with file contents. Reject anything the buffer cannot hold,
+     * and a non-positive sample rate, which the fps estimate divides by. */
+    if (channels < 1 || channels > 2) {
+        snprintf(result->error, sizeof(result->error),
+                 "Unsupported channel count: %d (need 1 or 2)", channels);
+        fclose(f);
+        return -1;
+    }
+    if (sample_rate <= 0) {
+        snprintf(result->error, sizeof(result->error),
+                 "Invalid sample rate: %d", sample_rate);
+        fclose(f);
+        return -1;
+    }
+
     LOGI("Decoding LTC: %s (%d Hz, %d ch, channel %d)",
          wav_path, sample_rate, channels, channel);
 

@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <sys/stat.h>
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -54,6 +55,11 @@
  *
  * Returns heap-allocated float32 array (caller must free), or NULL on error.
  * ======================================================================== */
+
+/* Largest PCM payload accepted from a WAV. 256 MB is ~2.3 hours at 16 kHz
+ * mono or ~25 minutes at 44.1 kHz stereo -- well past any recording this
+ * service makes, and small enough that the ~3x working set fits on a phone. */
+#define WAV_MAX_DATA_BYTES (256 * 1024 * 1024)
 
 float *read_wav_pcm16(const char *path, int *out_samples, int *out_sample_rate) {
     FILE *f = fopen(path, "rb");
@@ -92,6 +98,16 @@ float *read_wav_pcm16(const char *path, int *out_samples, int *out_sample_rate) 
 
         if (fread(chunk_id, 1, 4, f) != 4) break;
         if (fread(&chunk_size, 4, 1, f) != 1) break;
+
+        /* chunk_size is signed 32-bit straight from the file. A negative
+         * value would make the fseek() below move backwards, and a chunk
+         * header that seeks back onto itself is re-read forever -- one
+         * request pins a worker thread at 100% CPU permanently. */
+        if (chunk_size < 0) {
+            LOGE("WAV chunk with negative size (%d): %s", chunk_size, path);
+            fclose(f);
+            return NULL;
+        }
 
         if (memcmp(chunk_id, "fmt ", 4) == 0) {
             /*
@@ -141,6 +157,39 @@ float *read_wav_pcm16(const char *path, int *out_samples, int *out_sample_rate) 
         LOGE("WAV must be 16-bit PCM (got %d-bit): %s", bits_per_sample, path);
         fclose(f);
         return NULL;
+    }
+
+    /* Every header field below drives either an allocation or a division,
+     * and every one of them came from the file. Validate before use. */
+    if (sample_rate <= 0) {
+        LOGE("WAV has invalid sample rate %d: %s", sample_rate, path);
+        fclose(f);
+        return NULL;
+    }
+    if (data_size <= 0) {
+        LOGE("WAV has invalid data size %d: %s", data_size, path);
+        fclose(f);
+        return NULL;
+    }
+    {
+        /* Bound the declared data size by what the file actually holds, and
+         * by a ceiling this device can plausibly process: the PCM is held
+         * once as int16 and again as float, so the working set is ~3x this. */
+        struct stat st;
+        long here = ftell(f);
+        if (fstat(fileno(f), &st) == 0 && here >= 0 &&
+            (long long)data_size > (long long)st.st_size - here) {
+            LOGE("WAV data size %d exceeds file (%lld bytes remain): %s",
+                 data_size, (long long)(st.st_size - here), path);
+            fclose(f);
+            return NULL;
+        }
+        if (data_size > WAV_MAX_DATA_BYTES) {
+            LOGE("WAV data size %d exceeds limit %d: %s",
+                 data_size, WAV_MAX_DATA_BYTES, path);
+            fclose(f);
+            return NULL;
+        }
     }
 
     /* Calculate number of samples per channel */
