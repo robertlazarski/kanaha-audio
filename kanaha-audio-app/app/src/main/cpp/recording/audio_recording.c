@@ -534,22 +534,16 @@ static void *scheduled_recording_thread(void *arg) {
 }
 
 int audio_recording_start(const char *clip_name, int sample_rate, int64_t start_at_ms) {
-    if (atomic_load(&s_state) != AUDIO_RECORDING_IDLE) {
-        LOGE("Recording already active");
-        return -1;
-    }
-
+    /* Argument validation touches only the caller's inputs and s_audio_dir
+     * (set once at init), so it needs no lock. */
     if (!clip_name || strlen(clip_name) == 0) {
         LOGE("clip_name is required");
         return -1;
     }
-
     if (strlen(s_audio_dir) == 0) {
         LOGE("Recording subsystem not initialized (call audio_recording_init first)");
         return -1;
     }
-
-    /* Validate clip_name: reject path traversal */
     if (strpbrk(clip_name, "\"\\\n\r\t") != NULL) {
         LOGE("clip_name contains an unsafe character");
         return -1;
@@ -559,18 +553,29 @@ int audio_recording_start(const char *clip_name, int sample_rate, int64_t start_
         return -1;
     }
 
+    /* From here on everything touches shared recording state (s_sample_rate,
+     * s_clip_name, s_wav_path, s_state), so it is all under the lifecycle lock.
+     * Writing the clip name and path before the lock let a second concurrent
+     * start() overwrite them while this one was still using them, even though
+     * the state check would reject that second call. */
+    pthread_mutex_lock(&s_lifecycle_lock);
+    if (atomic_load(&s_state) != AUDIO_RECORDING_IDLE) {
+        pthread_mutex_unlock(&s_lifecycle_lock);
+        LOGE("Recording already active or scheduled");
+        return -1;
+    }
+
     /* Set sample rate (default 16kHz for whisper.cpp compatibility) */
     s_sample_rate = (sample_rate == 44100) ? 44100 : 16000;
-
     strncpy(s_clip_name, clip_name, AUDIO_RECORDING_MAX_CLIP_NAME);
     s_clip_name[AUDIO_RECORDING_MAX_CLIP_NAME] = '\0';
-
-    /* Build WAV file path */
     snprintf(s_wav_path, sizeof(s_wav_path), "%s/%s.wav", s_audio_dir, s_clip_name);
 
-    /* If start_at is in the future, spawn a scheduling thread so the
-     * HTTP response returns immediately. Uses clock_nanosleep with
-     * TIMER_ABSTIME for kernel-level precision — no message queue jitter. */
+    /* If start_at is in the future, spawn a scheduling thread so the HTTP
+     * response returns immediately. clock_nanosleep(TIMER_ABSTIME) gives
+     * kernel-level precision -- no message-queue jitter. The spawned thread
+     * re-acquires this same lock after it wakes (see scheduled_recording_thread),
+     * and blocks on it only until we release below, so there is no deadlock. */
     if (start_at_ms > 0) {
         struct timespec now;
         clock_gettime(CLOCK_REALTIME, &now);
@@ -579,19 +584,11 @@ int audio_recording_start(const char *clip_name, int sample_rate, int64_t start_
         if (start_at_ms > now_ms) {
             int64_t *arg = malloc(sizeof(int64_t));
             if (!arg) {
+                pthread_mutex_unlock(&s_lifecycle_lock);
                 LOGE("Failed to allocate scheduling arg");
                 return -1;
             }
             *arg = start_at_ms;
-
-            /* Claim the slot under the lifecycle lock. */
-            pthread_mutex_lock(&s_lifecycle_lock);
-            if (atomic_load(&s_state) != AUDIO_RECORDING_IDLE) {
-                pthread_mutex_unlock(&s_lifecycle_lock);
-                LOGE("Recording already active or scheduled");
-                free(arg);
-                return -1;
-            }
             atomic_store(&s_state, AUDIO_RECORDING_SCHEDULED);
 
             pthread_t sched_thread;
@@ -614,13 +611,7 @@ int audio_recording_start(const char *clip_name, int sample_rate, int64_t start_
         /* start_at is in the past — fall through to immediate start */
     }
 
-    /* Immediate start, under the lifecycle lock. */
-    pthread_mutex_lock(&s_lifecycle_lock);
-    if (atomic_load(&s_state) != AUDIO_RECORDING_IDLE) {
-        pthread_mutex_unlock(&s_lifecycle_lock);
-        LOGE("Recording already active or scheduled");
-        return -1;
-    }
+    /* Immediate start (still holding the lock). */
     atomic_store(&s_state, AUDIO_RECORDING_SCHEDULED);
     int rc = recording_start_impl();
     pthread_mutex_unlock(&s_lifecycle_lock);
