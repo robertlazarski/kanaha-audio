@@ -61,8 +61,9 @@ client certificate is a full-access credential.
   `__android_log_print` or the `LOGI`/`LOGE` macros as the format argument.
 - **Key disclosure** — SSH private keys or TLS key material returned by an API,
   written to logs, or exposed through a traversal.
-- **Missing SSH host key verification** — making SFTP transfers interceptable on
-  the LAN.
+- **SSH host key verification** — now fails closed (a server absent from
+  `known_hosts` is refused). A regression back to soft-fail would make SFTP
+  transfers interceptable on the LAN.
 - **HTTP/2 protocol abuse** — stream or header handling that crashes or exhausts
   the process. The CVE-2026-49975 limits in `http2-performance.conf` exist for
   this reason.
@@ -79,6 +80,16 @@ client certificate is a full-access credential.
 - **adb access.** By design, `run-as` on a debuggable build grants app-level
   access. Enabling adb is a deliberate act by the device owner and is required
   for the MCP integration to work at all.
+- **The server key ships inside the APK** (`assets/ssl/server.key`). Anyone who
+  obtains an APK can impersonate the audio server to a client. This is accepted
+  for a private LAN with a distribution the owner controls; do not attach a
+  release APK containing a real key to a public release. Generating or
+  provisioning the key out of band is the fix if that changes.
+- **The client tooling in `tools/` disables server verification** (`curl -sk`),
+  so a LAN peer can impersonate the phone *to the laptop*. The server still
+  rejects an anonymous client, but the mutual half is not enforced client-side.
+  Closing it needs server certs with an IP `subjectAltName`; tracked as a known
+  gap, not yet done.
 - **The shared client certificate model.** Every device in a deployment shares
   one client certificate. Losing one device means regenerating and redeploying
   certificates everywhere rather than revoking a single credential. This is an
@@ -136,7 +147,7 @@ its own model context; it does not share state with the httpd child.
 | `audio_sftp.c` | Outbound network + keys | Host key verification, `servers.json` parsing. |
 | `audio_recording.c` | Device microphone | Writer thread lifecycle, WAV header finalisation. |
 | `kanaha_mcp.c` | adb stdio | Same operations, no TLS; access control is adb itself. |
-| Apache + Axis2/C + OpenSSL | Network | Upstream code; keep versions current. |
+| Apache + Axis2/C + OpenSSL | Network | Upstream code; statically linked, so "keep current" means rebuilding the binary. The shipped OpenSSL is 3.2.0 (the first release of that series); rebuild against a current 3.2.x/3.3.x. |
 
 ### Memory safety profile
 

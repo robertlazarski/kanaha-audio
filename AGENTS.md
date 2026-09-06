@@ -35,29 +35,29 @@ caller's input reaches C parsing code.
 
 ### 1. WAV parsing — the primary untrusted-input path
 
-`read_wav_pcm16()` in `audio_util.c` is reached by **every** audio operation
-(`searchKeywords`, `transcribe`, `detectAudioEvents`, `decodeLTC`). It parses
-attacker-influenced header fields and drives allocation from them.
+There are **two** WAV parsers, and any new one is the first thing to scrutinise.
+`read_wav_pcm16()` in `audio_util.c` is reached by `searchKeywords`,
+`transcribe` and `detectAudioEvents`. `decodeLTC` does **not** use it — the LTC
+decoder has its own header parser in `ltc/ltc_decoder.c`. Both parse
+attacker-influenced header fields and drive allocation from them.
 
-Three specific patterns to examine, all currently unguarded:
+These patterns were found and are now guarded; re-verify any change near them,
+and apply the same checks to any parser added later:
 
-- **`sample_rate` is never validated.** It is read straight from the `fmt `
-  chunk and returned to callers, which divide by it:
-  `audio_duration_ms = (int64_t)n_samples * 1000 / sample_rate`
-  (`whisper_android_bridge.c`, both search and transcribe paths). A WAV
-  declaring `sample_rate = 0` is an integer division by zero — SIGFPE, process
-  down.
-- **The chunk-scan loop is unbounded.** `while (!found_data)` advances through
-  chunks with `fseek(f, chunk_size, SEEK_CUR)` where `chunk_size` is a signed
-  32-bit value straight from the file. A negative value seeks *backwards*; the
-  only loop exits are finding a `data` chunk or a short read. Check whether a
-  crafted file can make it spin.
-- **`data_size` bounds `malloc()` with no ceiling.** `malloc(data_size)` where
-  `data_size` is an unbounded `int32_t` from the file. On a device with ~2.8 GB
-  of RAM this is a memory-exhaustion lever; also check the signed/unsigned
-  conversion when it is negative.
+- **`sample_rate <= 0`** — used as a divisor and, in YAMNet, to derive a sample
+  offset. A negative rate produced an out-of-bounds read before the buffer;
+  `sample_rate = 0` is undefined behaviour (silent 0 on arm64, SIGFPE on an x86
+  test build), not the clean crash you might expect. Now rejected in both parsers.
+- **Negative `chunk_size`** — `fseek(f, chunk_size, SEEK_CUR)` with a negative
+  signed value seeks *backwards*; a chunk that seeks onto itself pins the worker
+  at 100% forever. Now rejected.
+- **Unbounded `data_size`** — `malloc(data_size)` from the file, now bounded by
+  the remaining file size and a 256 MB ceiling.
+- **LTC channel count** — `read_buf` is a fixed stack buffer sized for two
+  channels; a WAV declaring more overflowed it with file contents (the most
+  severe defect found). Now rejected unless 1 or 2 channels.
 
-Key file: `kanaha-audio-app/app/src/main/cpp/audio_util.c`
+Key files: `cpp/audio_util.c`, `cpp/ltc/ltc_decoder.c`, `cpp/yamnet/yamnet_bridge.c`
 
 ### 2. Caller-controlled file paths
 
@@ -99,8 +99,10 @@ lifetime errors around the `json_object *` returned to the framework, and for th
 `cpp/sftp/audio_sftp.c` uses libssh2 with ed25519 keys and reads server
 definitions from `files/ssh/servers.json`.
 
-- Verify **host key checking**. A missing or ignored known-hosts check makes
-  every transfer MITM-able on the LAN.
+- **Host key checking now fails closed** (it did not before: a missing or
+  not-found `known_hosts` was logged at DEBUG and allowed through, making every
+  transfer MITM-able on the LAN). The server must be listed in
+  `files/ssh/known_hosts` or the connection is refused. Re-verify if this changes.
 - `servers.json` is parsed from app storage; check the JSON handling for the
   same fixed-buffer patterns as above.
 - Private keys live in `files/ssh/keys/`. Confirm nothing logs them and that no
