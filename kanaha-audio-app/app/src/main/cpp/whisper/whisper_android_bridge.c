@@ -156,6 +156,43 @@ static void whisper_bridge_cleanup_unlocked(void) {
  *   - medium: ~2.6 GB RAM, high accuracy but slow
  * ======================================================================== */
 
+/* DTW alignment-head preset for the loaded model. Hardcoding BASE_EN silently
+ * degraded token timestamps whenever a different model (tiny.en, small.en, ...)
+ * was loaded -- the docs advertise those. Match the preset to the model, and
+ * fall back to NONE (DTW off) rather than a wrong preset. */
+static enum whisper_alignment_heads_preset dtw_preset_for_model(const char *m) {
+    if (!m) return WHISPER_AHEADS_NONE;
+    if (!strcmp(m, "tiny.en"))   return WHISPER_AHEADS_TINY_EN;
+    if (!strcmp(m, "tiny"))      return WHISPER_AHEADS_TINY;
+    if (!strcmp(m, "base.en"))   return WHISPER_AHEADS_BASE_EN;
+    if (!strcmp(m, "base"))      return WHISPER_AHEADS_BASE;
+    if (!strcmp(m, "small.en"))  return WHISPER_AHEADS_SMALL_EN;
+    if (!strcmp(m, "small"))     return WHISPER_AHEADS_SMALL;
+    if (!strcmp(m, "medium.en")) return WHISPER_AHEADS_MEDIUM_EN;
+    if (!strcmp(m, "medium"))    return WHISPER_AHEADS_MEDIUM;
+    if (!strcmp(m, "large-v3-turbo")) return WHISPER_AHEADS_LARGE_V3_TURBO;
+    if (!strcmp(m, "large-v3"))  return WHISPER_AHEADS_LARGE_V3;
+    if (!strcmp(m, "large-v2"))  return WHISPER_AHEADS_LARGE_V2;
+    if (!strcmp(m, "large"))     return WHISPER_AHEADS_LARGE_V1;
+    LOGE("No DTW aheads preset for model '%s'; disabling DTW (timestamps degrade)", m);
+    return WHISPER_AHEADS_NONE;
+}
+
+/* Escape a string into a JSON string literal (out >= 2*len+1); drops controls. */
+static const char *wjson_escape(const char *in, char *out, size_t out_size) {
+    size_t j = 0;
+    for (size_t i = 0; in && in[i] && j + 2 < out_size; i++) {
+        unsigned char c = (unsigned char)in[i];
+        if (c == '"' || c == '\\') { out[j++] = '\\'; out[j++] = c; }
+        else if (c == '\n') { out[j++] = '\\'; out[j++] = 'n'; }
+        else if (c == '\r') { out[j++] = '\\'; out[j++] = 'r'; }
+        else if (c == '\t') { out[j++] = '\\'; out[j++] = 't'; }
+        else if (c >= 0x20) { out[j++] = (char)c; }
+    }
+    out[j] = '\0';
+    return out;
+}
+
 static int whisper_bridge_load_model_unlocked(const char *model_name) {
     if (!g_initialized) {
         LOGE("Whisper bridge not initialized");
@@ -214,7 +251,7 @@ static int whisper_bridge_load_model_unlocked(const char *model_name) {
      * inferred. If a different model is ever added, this needs a lookup, and a
      * mismatched preset degrades alignment silently. */
     cparams.dtw_token_timestamps = true;
-    cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
+    cparams.dtw_aheads_preset = dtw_preset_for_model(model_name);
 
     /* whisper.cpp silently disables DTW when flash attention is on --
      *   "dtw_token_timestamps is not supported with flash_attn - disabling"
@@ -812,9 +849,11 @@ int whisper_bridge_list_audio_files(
         }
         first = 0;
 
+        char esc_name[512];
         offset += snprintf(json_buffer + offset, buffer_size - offset,
             "{\"name\":\"%s\",\"size_bytes\":%lld}",
-            entry->d_name, (long long)st.st_size);
+            wjson_escape(entry->d_name, esc_name, sizeof(esc_name)),
+            (long long)st.st_size);
     }
 
     closedir(dir);
