@@ -525,6 +525,16 @@ int audio_search_service_invoke_json_impl(
             return -1;
         }
 
+        /* The escaped text plus the ~160-char JSON wrapper must fit the fixed
+         * response buffer. snprintf would otherwise truncate mid-string and
+         * emit syntactically invalid JSON; return an explicit error instead. */
+        if (strlen(escaped_text) + 256 >= response_size) {
+            free(escaped_text);
+            free(result.text);
+            create_error_response(json_response, response_size,
+                "Transcript exceeds response buffer; use searchKeywords or split the audio");
+            return -1;
+        }
         snprintf(json_response, response_size,
             "{\"success\":true,\"text\":\"%s\",\"num_segments\":%d,"
             "\"audio_duration_ms\":%lld,\"processing_time_ms\":%lld}",
@@ -607,11 +617,13 @@ int audio_search_service_invoke_json_impl(
             if (i > 0) {
                 offset = safe_snprintf(json_response, response_size, offset, ",");
             }
+            char *esc_mname = json_escape_string(models[i].name);
             offset = safe_snprintf(json_response, response_size, offset,
                 "{\"name\":\"%s\",\"size_bytes\":%lld,\"loaded\":%s}",
-                models[i].name,
+                esc_mname ? esc_mname : "",
                 (long long)models[i].size_bytes,
                 models[i].loaded ? "true" : "false");
+            free(esc_mname);
         }
 
         safe_snprintf(json_response, response_size, offset,
