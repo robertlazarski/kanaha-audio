@@ -3,7 +3,7 @@
 # with AudioSearchService + whisper/yamnet/ltc/sftp statically linked.
 # Path B (see kanaha-audio/docs/PATH_B_HTTP2_MIGRATION.md). Clones
 # link-httpd-axis2.sh (camera) + adds the audio DSP libs from build-android.sh.
-set -e
+set -euo pipefail
 
 HTTPD=/home/robert/android-cross-builds/httpd-2.4.66
 DEPS=/home/robert/android-cross-builds/deps/arm64-v8a
