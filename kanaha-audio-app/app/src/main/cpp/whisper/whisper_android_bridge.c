@@ -837,23 +837,29 @@ int whisper_bridge_list_audio_files(
         struct stat st;
         if (stat(filepath, &st) != 0) continue;
 
-        /* Check remaining buffer: need room for comma + JSON entry + closing ]} */
-        size_t needed = strlen(entry->d_name) + 50;  /* {"name":"...","size_bytes":...} */
-        if (offset + needed + 3 >= buffer_size) {     /* +3 for "]}" and NUL */
+        /* Escape first, then size the check from the ESCAPED length -- escaping
+         * can up to double a name, so checking the raw length under-reserves.
+         * Then clamp the write: snprintf returns the length it *wanted* to
+         * write, not what it actually wrote, so an unchecked `offset += snprintf`
+         * on truncation would push offset past buffer_size and make the closing
+         * snprintf(... buffer_size - offset ...) underflow to a huge size_t and
+         * write out of bounds. */
+        char esc_name[512];
+        wjson_escape(entry->d_name, esc_name, sizeof(esc_name));
+        size_t needed = strlen(esc_name) + 48;   /* {"name":"","size_bytes":N} + comma */
+        if (offset + needed + 3 >= buffer_size) { /* +3 for "]}" and NUL */
             LOGD("JSON buffer full, truncating file list at %zu bytes", offset);
             break;
         }
-
-        if (!first) {
-            offset += snprintf(json_buffer + offset, buffer_size - offset, ",");
+        int w = snprintf(json_buffer + offset, buffer_size - offset,
+            "%s{\"name\":\"%s\",\"size_bytes\":%lld}",
+            first ? "" : ",", esc_name, (long long)st.st_size);
+        if (w < 0 || (size_t)w >= buffer_size - offset) {
+            LOGD("JSON entry would truncate; stopping file list");
+            break;   /* do NOT advance offset past the buffer */
         }
+        offset += (size_t)w;
         first = 0;
-
-        char esc_name[512];
-        offset += snprintf(json_buffer + offset, buffer_size - offset,
-            "{\"name\":\"%s\",\"size_bytes\":%lld}",
-            wjson_escape(entry->d_name, esc_name, sizeof(esc_name)),
-            (long long)st.st_size);
     }
 
     closedir(dir);
