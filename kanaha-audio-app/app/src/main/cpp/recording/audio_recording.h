@@ -49,7 +49,8 @@ extern "C" {
 typedef enum {
     AUDIO_RECORDING_IDLE = 0,
     AUDIO_RECORDING_ACTIVE,
-    AUDIO_RECORDING_STOPPING
+    AUDIO_RECORDING_STOPPING,
+    AUDIO_RECORDING_SCHEDULED   /* start requested; not yet capturing */
 } audio_recording_state_t;
 
 /**

@@ -136,6 +136,7 @@ static int64_t s_recording_start_ms = 0;       /* Wall-clock start time */
 
 static pthread_t s_writer_thread;              /* Disk writer thread */
 static atomic_int s_writer_running = 0;        /* 1 if writer thread is joinable */
+static atomic_int s_stop_in_progress = 0;      /* serialises concurrent stop() calls */
 
 #ifdef __ANDROID__
 static AAudioStream *s_stream = NULL;          /* AAudio input (mic) stream */
@@ -355,7 +356,9 @@ int audio_recording_init(const char *audio_dir) {
 }
 
 void audio_recording_cleanup(void) {
-    if (atomic_load(&s_state) == AUDIO_RECORDING_ACTIVE) {
+    int st = atomic_load(&s_state);
+    if (st == AUDIO_RECORDING_ACTIVE || st == AUDIO_RECORDING_STOPPING ||
+        st == AUDIO_RECORDING_SCHEDULED) {
         int64_t dur, sz;
         audio_recording_stop(&dur, &sz);
     }
@@ -502,8 +505,10 @@ static void *scheduled_recording_thread(void *arg) {
         clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &ts, NULL);
     }
 
-    /* Check that we haven't been cancelled (e.g., cleanup called) */
-    if (atomic_load(&s_state) != AUDIO_RECORDING_IDLE) {
+    /* The start slot was claimed as SCHEDULED when this thread was created.
+     * If anything else has happened since (a stop cancelled it, cleanup ran),
+     * the state is no longer SCHEDULED and this start must not proceed. */
+    if (atomic_load(&s_state) != AUDIO_RECORDING_SCHEDULED) {
         LOGE("Scheduled recording cancelled (state changed)");
         return NULL;
     }
@@ -562,6 +567,17 @@ int audio_recording_start(const char *clip_name, int sample_rate, int64_t start_
             }
             *arg = start_at_ms;
 
+            /* Claim the single recording slot atomically. The IDLE check at
+             * the top of this function is not enough: two callers can both
+             * pass it and both reach here, ending up with two writer threads,
+             * two AAudio streams and a leaked FILE*. Only one CAS wins. */
+            int expected = AUDIO_RECORDING_IDLE;
+            if (!atomic_compare_exchange_strong(&s_state, &expected, AUDIO_RECORDING_SCHEDULED)) {
+                LOGE("Recording already active or scheduled");
+                free(arg);
+                return -1;
+            }
+
             pthread_t sched_thread;
             pthread_attr_t attr;
             pthread_attr_init(&attr);
@@ -572,6 +588,7 @@ int audio_recording_start(const char *clip_name, int sample_rate, int64_t start_
             if (rc != 0) {
                 LOGE("Failed to create scheduling thread");
                 free(arg);
+                atomic_store(&s_state, AUDIO_RECORDING_IDLE);  /* release the claim */
                 return -1;
             }
             return 0;  /* Return immediately — recording starts later */
@@ -579,7 +596,16 @@ int audio_recording_start(const char *clip_name, int sample_rate, int64_t start_
         /* start_at is in the past — fall through to immediate start */
     }
 
-    /* Immediate start (no scheduling) */
+    /* Immediate start (no scheduling). Same atomic claim as the scheduled
+     * path; recording_start_impl() moves SCHEDULED -> ACTIVE on success and
+     * back to IDLE on failure. */
+    {
+        int expected = AUDIO_RECORDING_IDLE;
+        if (!atomic_compare_exchange_strong(&s_state, &expected, AUDIO_RECORDING_SCHEDULED)) {
+            LOGE("Recording already active or scheduled");
+            return -1;
+        }
+    }
     return recording_start_impl();
 }
 
@@ -593,8 +619,34 @@ int audio_recording_start(const char *clip_name, int sample_rate, int64_t start_
  *   6. Set state to IDLE
  */
 int audio_recording_stop(int64_t *out_duration_ms, int64_t *out_file_size) {
-    if (atomic_load(&s_state) != AUDIO_RECORDING_ACTIVE) {
+    int cur_state = atomic_load(&s_state);
+
+    /* A scheduled-but-not-started recording is cancelled by flipping the
+     * claim back to IDLE; the sleeping scheduler thread sees that and exits. */
+    if (cur_state == AUDIO_RECORDING_SCHEDULED) {
+        int expected = AUDIO_RECORDING_SCHEDULED;
+        if (atomic_compare_exchange_strong(&s_state, &expected, AUDIO_RECORDING_IDLE)) {
+            LOGI("Scheduled recording cancelled before start");
+            if (out_duration_ms) *out_duration_ms = 0;
+            if (out_file_size) *out_file_size = 0;
+            return 0;
+        }
+        cur_state = atomic_load(&s_state);  /* it started between load and CAS */
+    }
+
+    /* STOPPING is accepted as well as ACTIVE. The AAudio error callback sets
+     * STOPPING and nothing else, so without this a mic disconnect left the
+     * stream open, the WAV header unfinalised, and both start and stop
+     * refusing forever. */
+    if (cur_state != AUDIO_RECORDING_ACTIVE && cur_state != AUDIO_RECORDING_STOPPING) {
         LOGE("No active recording to stop");
+        return -1;
+    }
+
+    /* Only one caller may run the teardown sequence. */
+    int zero = 0;
+    if (!atomic_compare_exchange_strong(&s_stop_in_progress, &zero, 1)) {
+        LOGE("Stop already in progress");
         return -1;
     }
 
@@ -645,11 +697,14 @@ int audio_recording_stop(int64_t *out_duration_ms, int64_t *out_file_size) {
          (long long)s_total_samples_written);
 
     atomic_store(&s_state, AUDIO_RECORDING_IDLE);
+    atomic_store(&s_stop_in_progress, 0);
     return 0;
 }
 
 int audio_recording_is_active(void) {
-    return atomic_load(&s_state) == AUDIO_RECORDING_ACTIVE ? 1 : 0;
+    /* Anything but IDLE means a stop() is meaningful: capturing, winding
+     * down after an error, or scheduled and cancellable. */
+    return atomic_load(&s_state) != AUDIO_RECORDING_IDLE ? 1 : 0;
 }
 
 const char *audio_recording_get_clip_name(void) {
