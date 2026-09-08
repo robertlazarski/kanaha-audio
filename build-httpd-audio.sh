@@ -5,9 +5,9 @@
 # link-httpd-axis2.sh (camera) + adds the audio DSP libs from build-android.sh.
 set -euo pipefail
 
-HTTPD=/home/robert/android-cross-builds/httpd-2.4.66
-DEPS=/home/robert/android-cross-builds/deps/arm64-v8a
-NDK=/home/robert/Android/Sdk/ndk/28.0.12916984
+HTTPD=$HOME/android-cross-builds/httpd-2.4.66
+DEPS=$HOME/android-cross-builds/deps/arm64-v8a
+NDK=$HOME/Android/Sdk/ndk/28.0.12916984
 # android28: required because AAudio (-laaudio) is API 26+. The prebuilt httpd
 # .a files were built at android21 and link forward-compatibly under android28.
 CC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang
@@ -16,7 +16,7 @@ CC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang
 CXX=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang++
 AR=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
 
-SRC=/home/robert/repos/kanaha-audio/kanaha-audio-app/app/src/main/cpp
+SRC=$HOME/repos/kanaha-audio/kanaha-audio-app/app/src/main/cpp
 
 INCLUDES="-I$SRC -I$DEPS/include -I$DEPS/include/apr-1 \
  -I$DEPS/include/axis2-2.0.0 -I$DEPS/include/axis2-2.0.0/platforms/unix \
