@@ -54,6 +54,7 @@ public class AudioService extends Service {
     private PowerManager.WakeLock wakeLock;
     private Process serverProcess;
     private boolean isRunning = false;
+    private NetworkDiscoveryService networkDiscovery;
 
     @Override
     public void onCreate() {
@@ -61,6 +62,7 @@ public class AudioService extends Service {
         Log.i(TAG, "AudioService created");
         createNotificationChannel();
         acquireWakeLock();
+        networkDiscovery = new NetworkDiscoveryService(this);
     }
 
     @Override
@@ -89,6 +91,7 @@ public class AudioService extends Service {
     @Override
     public void onDestroy() {
         Log.i(TAG, "AudioService destroying");
+        if (networkDiscovery != null) networkDiscovery.unregisterService();
         stopServer();
         releaseWakeLock();
         super.onDestroy();
@@ -335,6 +338,8 @@ public class AudioService extends Service {
             isRunning = true;
             Log.i(TAG, "Kanaha Audio server running on port " + SERVER_PORT);
             updateNotification("Running on port " + SERVER_PORT);
+            // Advertise over mDNS so clients can discover this server (core Kanaha feature).
+            networkDiscovery.registerService(SERVER_PORT);
         } else {
             int exitCode = serverProcess.exitValue();
             Log.e(TAG, "Server process exited with code: " + exitCode

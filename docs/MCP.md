@@ -161,7 +161,7 @@ Claude Desktop can connect to multiple Kanaha devices simultaneously:
   "mcpServers": {
     "kanaha-camera": {
       "command": "adb",
-      "args": ["-s", "PIXEL_SERIAL", "shell", "/data/data/org.kanaha.camera/files/kanaha-mcp"]
+      "args": ["-s", "PIXEL_SERIAL", "shell", "/data/data/org.kanaha.camera/files/kanaha-camera-mcp"]
     },
     "kanaha-audio-room": {
       "command": "adb",

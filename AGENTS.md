@@ -28,6 +28,25 @@ The security-relevant consequence: this process parses **untrusted binary media*
 (WAV files) and **untrusted JSON**, in C, on a device with a hard per-app memory
 budget. Weight scans accordingly.
 
+## Operation modes
+
+Two ways to run, consistent with the other Kanaha server apps:
+
+- **Server mode (headless).** Start the foreground service directly, no UI:
+
+      adb shell am start-foreground-service \
+        -a org.kanaha.audio.START_SERVER -n org.kanaha.audio/.AudioService
+
+  `AudioService` is `exported="true"` so adb/other apps can start it — a
+  non-exported service cannot be started this way on modern Android (API 31+).
+  It launches the mTLS httpd on 8443 and advertises mDNS, working with the phone
+  locked and the screen off (the room-mic demo relies on this).
+- **Standalone mode.** Launch the activity; it starts the same service. The
+  recorder UI is a convenience, not required for the server.
+
+Like every Kanaha server app, audio advertises **mDNS/DNS-SD** (`_https._tcp`,
+TXT `api=kanaha-audio-search`) so clients discover it without a static IP.
+
 ## Highest-value scan areas
 
 Ranked by exploitability, not by code size. Areas 1 and 2 are where a remote

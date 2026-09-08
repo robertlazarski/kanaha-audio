@@ -37,9 +37,13 @@
             </intent-filter>
         </activity>
 
+        <!-- exported=true enables headless "server mode": start via
+             am start-foreground-service -a org.kanaha.audio.START_SERVER.
+             Modern Android blocks adb/other apps from starting a non-exported
+             service. onStartCommand only launches the local mTLS-gated server. -->
         <service
             android:name=".AudioService"
-            android:exported="false"
+            android:exported="true"
             android:foregroundServiceType="microphone" />
 
     </application>
