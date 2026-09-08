@@ -79,7 +79,7 @@ a different design and is not what the current API supports.
 ## Verify on device (the test that settles it)
 ```
 adb forward tcp:8443 tcp:8443
-SSL=/path/to/kanaha-camera-app/app/src/main/assets/ssl   # shared CA; client.crt lives here
+SSL=~/kanaha-certs   # your CA dir: client.crt, client.key, ca.crt
 curl -v -sk --http2 --cert $SSL/client.crt --key $SSL/client.key --cacert $SSL/ca.crt \
   -H "Content-Type: application/json" \
   -d '{"action":"searchKeywords","audio_file":"presentation.wav","keywords":["next slide please"]}' \
@@ -89,10 +89,10 @@ Success = `ALPN: server accepted h2` + `using HTTP/2` (kanaha-calcs already show
 Failure = `server did not agree on a protocol` → still the old server / mod_http2 not linked.
 
 ## Certs note
-All kanaha apps share one CA (`ca.crt` is byte-identical across repos). The client
-cert (`CN=kanaha-control`) lives only in `kanaha-camera-app/app/src/main/assets/ssl/`;
-the audio repo ships only server certs. Copy `client.crt`/`client.key` from the camera
-repo if you want the audio `tools/*.sh` to run standalone.
+Run a small private CA off-device (its key never ships). Each device mints its own
+key + CSR on first run and is provisioned with a CA-signed cert; issue a client
+cert from the same CA for the `tools/*.sh` and the curl examples above. Point the
+`SSL=` line at wherever that client cert + `ca.crt` live.
 
 ## Rollback
 Revert `AudioService.java` and remove `assets/apache/` + `assets/axis2c/axis2.xml`;

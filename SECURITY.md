@@ -80,21 +80,22 @@ client certificate is a full-access credential.
 - **adb access.** By design, `run-as` on a debuggable build grants app-level
   access. Enabling adb is a deliberate act by the device owner and is required
   for the MCP integration to work at all.
-- **The server key ships inside the APK** (`assets/ssl/server.key`). Anyone who
-  obtains an APK can impersonate the audio server to a client. This is accepted
-  for a private LAN with a distribution the owner controls; do not attach a
-  release APK containing a real key to a public release. Generating or
-  provisioning the key out of band is the fix if that changes.
+- **The device mints its own key on-device; no private key ships in the APK.**
+  On first run the app generates its RSA keypair + CSR (`files/csr/audio.csr`)
+  and refuses to serve until an operator signs the CSR with the off-device
+  Kanaha CA and pushes back a CA-signed cert (the CA key never ships). Client
+  certs for the mutual half are issued from that same CA. Revocation (CRL/OCSP)
+  is a pre-production item; device certs are one-year.
 - **The client tooling in `tools/` disables server verification** (`curl -sk`),
   so a LAN peer can impersonate the phone *to the laptop*. The server still
   rejects an anonymous client, but the mutual half is not enforced client-side.
   Closing it needs server certs with an IP `subjectAltName`; tracked as a known
   gap, not yet done.
-- **The shared client certificate model.** Every device in a deployment shares
-  one client certificate. Losing one device means regenerating and redeploying
-  certificates everywhere rather than revoking a single credential. This is an
-  accepted trade-off for a small trusted LAN, documented in
-  [docs/SECURITY.md](docs/SECURITY.md); it is not a vulnerability report.
+- **Per-device certificates, revocation deferred.** Each device mints its own key
+  and is provisioned with a unique CA-signed cert (no shared client cert). CRL/OCSP
+  revocation is not wired up yet, so a compromised device is handled by reissuing
+  the CA and re-provisioning, or by letting its one-year cert expire — a pre-production
+  item, not a vulnerability report.
 - **Exposure to a hostile network.** The threat model assumes a private LAN.
   Publishing port 8443 to the internet is a deployment decision outside the
   model.

@@ -55,6 +55,7 @@ public class AudioService extends Service {
     private Process serverProcess;
     private boolean isRunning = false;
     private NetworkDiscoveryService networkDiscovery;
+    private CertProvisioning provisioning;
 
     @Override
     public void onCreate() {
@@ -63,6 +64,7 @@ public class AudioService extends Service {
         createNotificationChannel();
         acquireWakeLock();
         networkDiscovery = new NetworkDiscoveryService(this);
+        provisioning = new CertProvisioning(getFilesDir());
     }
 
     @Override
@@ -111,13 +113,26 @@ public class AudioService extends Service {
             return;
         }
 
-        try {
-            setupFiles();
-            launchNativeProcess();
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to start server", e);
-            updateNotification("Error: " + e.getMessage());
-        }
+        // File deploy + keypair generation + the native-process wait are all heavy;
+        // run them off the main thread to avoid an ANR (startForeground already ran).
+        new Thread(() -> {
+            try {
+                setupFiles();
+                // Mint this device's keypair + CSR (private key never leaves).
+                provisioning.ensureKeypairAndCsr();
+                // Provision-required (RAPI parity): serve only after an operator has
+                // signed the CSR with the off-device Kanaha CA and pushed back a cert.
+                if (!provisioning.isProvisioned()) {
+                    updateNotification("Awaiting provisioning \u2014 sign files/csr/audio.csr with the Kanaha CA");
+                    Log.w(TAG, "Not provisioned; server not started. Run: kanaha-provision.sh <serial> audio");
+                    return;
+                }
+                launchNativeProcess();
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to start server", e);
+                updateNotification("Error: " + e.getMessage());
+            }
+        }, "audio-provision-start").start();
     }
 
     private void stopServer() {
@@ -161,43 +176,14 @@ public class AudioService extends Service {
 
         deployMcpBinary(filesDir);
 
-        // Certs go under the ServerRoot so ssl.conf's "ssl/server.crt" resolves.
-        deploySslFromAssets(sslDir);
+        // SSL material is NOT shipped: CertProvisioning mints the keypair + CSR
+        // on-device and an operator provisions the CA-signed server.crt + ca.crt into
+        // apache/ssl (milestone B). The sslDir was created above.
 
         // Apache configuration + Axis2/C repository
         deployApacheConfig(apacheDir);
 
         Log.i(TAG, "Apache ServerRoot: " + apacheDir.getAbsolutePath());
-    }
-
-    private void deploySslFromAssets(File sslDir) {
-        String[] sslFiles = {"server.crt", "server.key", "ca.crt"};
-        for (String filename : sslFiles) {
-            File target = new File(sslDir, filename);
-            if (target.exists()) continue;
-
-            try (InputStream is = getAssets().open("ssl/" + filename)) {
-                try (FileOutputStream fos = new FileOutputStream(target)) {
-                    byte[] buf = new byte[4096];
-                    int n;
-                    while ((n = is.read(buf)) > 0) {
-                        fos.write(buf, 0, n);
-                    }
-                }
-                Log.i(TAG, "Deployed SSL: " + filename);
-                if (filename.endsWith(".key")) {
-                    // Private key: restrict to owner-only (defense in depth beyond
-                    // the app sandbox — matters on rooted devices). Clear all, then
-                    // grant owner read/write.
-                    target.setReadable(false, false);
-                    target.setWritable(false, false);
-                    target.setReadable(true, true);
-                    target.setWritable(true, true);
-                }
-            } catch (IOException e) {
-                Log.d(TAG, "SSL asset not found (will need manual deploy): " + filename);
-            }
-        }
     }
 
     /**

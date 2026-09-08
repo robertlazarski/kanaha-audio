@@ -228,7 +228,7 @@ The silent audio track is required — without it, ffmpeg concat produces broken
 
 MOTO=192.168.8.126    # Moto X4 running Kanaha Audio (room mic)
 PIXEL=192.168.8.159   # Pixel 10 Pro XL running Kanaha Camera (video)
-SSL=$HOME/repos/kanaha/kanaha-camera-app/app/src/main/assets/ssl
+SSL=~/kanaha-certs   # your CA dir: client.crt, client.key, ca.crt
 CURL="curl -sk --http2 --cert $SSL/client.crt --key $SSL/client.key --cacert $SSL/ca.crt -H Content-Type:application/json"
 
 # 1. Start both devices

@@ -11,7 +11,7 @@ from the original hand-rolled HTTP/1.1 server to real Apache (verified on device
 `ALPN: server accepted h2` → `HTTP/2 200`).
 
 - **HTTPS/HTTP2 + mTLS**: all API traffic is TLS with mutual certificate auth; `Protocols h2 http/1.1` (TLS-only — there is no cleartext listener)
-- **Certificate chain**: self-signed CA → server cert + client cert (shared CA with Kanaha Camera)
+- **Certificate chain**: self-signed Kanaha CA (off-device) → per-device server cert (minted on-device, provisioned on first run) + CA-issued client certs
 - **No anonymous access**: `SSLVerifyClient require` (in `ssl.conf`) rejects connections without a valid client cert at the TLS handshake
 - **Modern TLS only**: `SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1` (TLS 1.2 / 1.3)
 
@@ -31,9 +31,10 @@ kanaha-audio-httpd -p 8443 \
   -a /path/to/ca.crt           # CA cert for client verification (mTLS)
 ```
 
-Uses the same certificate infrastructure as Kanaha Camera (identical CA). The
-client cert (`CN=kanaha-control`) and `ca.key` live in the camera repo's
-`assets/ssl/`; see the Kanaha Camera docs for certificate generation.
+Uses the same Kanaha CA as the other apps (one trust anchor). The device mints
+its own key + CSR on first run and is provisioned with a CA-signed cert; the CA
+key lives off-device (never in the repo or APK). See the Kanaha Camera docs for
+the provisioning flow.
 
 ## HTTP/2 DoS Hardening (CVE-2026-49975)
 
