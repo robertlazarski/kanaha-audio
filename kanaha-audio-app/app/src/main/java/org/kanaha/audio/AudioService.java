@@ -53,7 +53,15 @@ public class AudioService extends Service {
 
     private PowerManager.WakeLock wakeLock;
     private Process serverProcess;
-    private boolean isRunning = false;
+    private volatile boolean isRunning = false;
+    private volatile boolean isStarting = false;
+    private volatile boolean stopRequested = false;
+    // Visible to MainActivity so it can distinguish its own serving instance
+    // from a third-party holder of the port. True only while the httpd is up.
+    public static volatile boolean RUNNING = false;
+    // True from the synchronous start until the setup thread finishes, so the
+    // UI does not flag its own starting service as a third-party port conflict.
+    public static volatile boolean STARTING = false;
     private NetworkDiscoveryService networkDiscovery;
     private CertProvisioning provisioning;
 
@@ -62,7 +70,6 @@ public class AudioService extends Service {
         super.onCreate();
         Log.i(TAG, "AudioService created");
         createNotificationChannel();
-        acquireWakeLock();
         networkDiscovery = new NetworkDiscoveryService(this);
         provisioning = new CertProvisioning(getFilesDir());
     }
@@ -80,6 +87,11 @@ public class AudioService extends Service {
                 stopServer();
                 stopSelf();
             }
+        } else {
+            // Sticky restart with a null intent: nothing to (re)start here, so
+            // stop instead of lingering as an idle foreground service holding the
+            // wake lock (onDestroy releases it).
+            stopSelf();
         }
 
         return START_STICKY;
@@ -100,8 +112,8 @@ public class AudioService extends Service {
     }
 
     private void startServer() {
-        if (isRunning) {
-            Log.i(TAG, "Server already running");
+        if (isRunning || isStarting) {
+            Log.i(TAG, "Server already running or starting");
             return;
         }
 
@@ -113,6 +125,14 @@ public class AudioService extends Service {
             return;
         }
 
+        // Guard synchronously on the main thread so a rapid second START_SERVER
+        // intent cannot spawn a concurrent setup thread (which would race on the
+        // staging file and could launch a second server). isRunning flips only
+        // later, on the background thread, so it cannot guard this window alone.
+        isStarting = true;
+        STARTING = true;
+        stopRequested = false;
+
         // File deploy + keypair generation + the native-process wait are all heavy;
         // run them off the main thread to avoid an ANR (startForeground already ran).
         new Thread(() -> {
@@ -120,6 +140,7 @@ public class AudioService extends Service {
                 setupFiles();
                 // Mint this device's keypair + CSR (private key never leaves).
                 provisioning.ensureKeypairAndCsr();
+                if (stopRequested) return;
                 // Provision-required (RAPI parity): serve only after an operator has
                 // signed the CSR with the off-device Kanaha CA and pushed back a cert.
                 if (!provisioning.isProvisioned()) {
@@ -128,22 +149,42 @@ public class AudioService extends Service {
                     return;
                 }
                 launchNativeProcess();
+                // A stop during setup found no process to kill; tear down here so
+                // we leave no orphan, and hold the wake lock only once serving.
+                if (stopRequested) { stopServer(); return; }
+                // Acquire under the monitor and re-check stopRequested so a STOP
+                // that races in here cannot leave the lock held after onDestroy
+                // has already torn the service down.
+                synchronized (this) {
+                    if (isRunning && !stopRequested) {
+                        RUNNING = true;
+                        acquireWakeLock();
+                    }
+                }
             } catch (Exception e) {
                 Log.e(TAG, "Failed to start server", e);
                 updateNotification("Error: " + e.getMessage());
+            } finally {
+                isStarting = false;
+                STARTING = false;
             }
         }, "audio-provision-start").start();
     }
 
     private void stopServer() {
-        if (serverProcess != null) {
-            Log.i(TAG, "Stopping native server process");
-            serverProcess.destroy();
-            serverProcess = null;
+        synchronized (this) {
+            stopRequested = true;
+            if (serverProcess != null) {
+                Log.i(TAG, "Stopping native server process");
+                serverProcess.destroy();
+                serverProcess = null;
+            }
+            // Also kill by name in case process was orphaned
+            killOrphanedProcesses();
+            isRunning = false;
+            RUNNING = false;
+            releaseWakeLock();
         }
-        // Also kill by name in case process was orphaned
-        killOrphanedProcesses();
-        isRunning = false;
     }
 
     /**
@@ -311,23 +352,26 @@ public class AudioService extends Service {
         // this env var (real Apache doesn't take the old -m flag).
         env.put("KANAHA_AUDIO_MODELS", modelsDir);
 
-        serverProcess = pb.start();
-        Log.i(TAG, "Process started with PID: " + getProcessId(serverProcess));
+        Process p = pb.start();
+        serverProcess = p;
+        Log.i(TAG, "Process started with PID: " + getProcessId(p));
 
         // Read output in background thread
-        startOutputReader(serverProcess);
+        startOutputReader(p);
 
-        // Verify process is alive after 2 seconds
+        // Verify the process is alive after 2 seconds. Use a local reference:
+        // a concurrent stopServer() may null serverProcess during this sleep,
+        // which would otherwise NPE here on a deliberate stop.
         Thread.sleep(2000);
 
-        if (serverProcess.isAlive()) {
+        if (p.isAlive()) {
             isRunning = true;
             Log.i(TAG, "Kanaha Audio server running on port " + SERVER_PORT);
             updateNotification("Running on port " + SERVER_PORT);
             // Advertise over mDNS so clients can discover this server (core Kanaha feature).
             networkDiscovery.registerService(SERVER_PORT);
         } else {
-            int exitCode = serverProcess.exitValue();
+            int exitCode = p.exitValue();
             Log.e(TAG, "Server process exited with code: " + exitCode
                 + " — check native logs (Apache config error or port " + SERVER_PORT + " conflict)");
             updateNotification("Error: process exited (code " + exitCode + ")");
@@ -430,21 +474,32 @@ public class AudioService extends Service {
             Log.w(TAG, "MCP binary not packaged: " + src);
             return;
         }
-        if (dst.exists() && dst.length() == src.length()) {
-            return;  // already current
-        }
+        // Write to a temp file then atomically rename over dst. rename()
+        // replaces the file even while an older copy is executing (a running
+        // MCP session keeps its now-unlinked inode), which avoids ETXTBSY on
+        // overwrite and guarantees the deployed binary matches the packaged
+        // one -- a length comparison would silently skip a same-size patch.
+        File tmp = new File(filesDir, "kanaha-audio-mcp.tmp");
         try (java.io.InputStream in = new java.io.FileInputStream(src);
-             java.io.OutputStream out = new java.io.FileOutputStream(dst)) {
+             java.io.OutputStream out = new java.io.FileOutputStream(tmp)) {
             byte[] buf = new byte[65536];
             int n;
             while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
         }
         catch (java.io.IOException e) {
             Log.e(TAG, "Failed to deploy MCP binary", e);
+            tmp.delete();
             return;
         }
-        if (!dst.setExecutable(true, true)) {
-            Log.w(TAG, "Could not mark MCP binary executable: " + dst);
+        if (!tmp.setExecutable(true, true)) {
+            Log.e(TAG, "Could not mark MCP binary executable, aborting deploy: " + tmp);
+            tmp.delete();
+            return;
+        }
+        if (!tmp.renameTo(dst)) {
+            Log.e(TAG, "Failed to rename MCP binary into place: " + dst);
+            tmp.delete();
+            return;
         }
         Log.i(TAG, "MCP binary deployed: " + dst.getAbsolutePath());
     }
@@ -452,7 +507,12 @@ public class AudioService extends Service {
     private void acquireWakeLock() {
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kanaha:audio");
-        wakeLock.acquire(60 * 60 * 1000L); // 1 hour max — auto-released if process dies
+        // No timeout: a timed acquire() drops the lock unconditionally when it
+        // fires (not on process death), which would let the device doze and
+        // freeze the MCP/httpd helpers mid-session -- worse now the activity
+        // holds the screen on and can outlive a 1-hour cap. Held for the
+        // service lifetime and released in onDestroy, matching the camera app.
+        wakeLock.acquire();
         Log.i(TAG, "Wake lock acquired");
     }
 
