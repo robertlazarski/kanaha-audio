@@ -19,6 +19,7 @@ import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.TextView;
 
@@ -41,6 +42,14 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // Keep the screen on while this activity is in the foreground. On the
+        // target hardware, backgrounding the app (or letting the device doze) was
+        // observed to both silence the microphone and freeze the adb-spawned MCP
+        // helper that the cue path drives. A microphone foreground service can hold
+        // the mic, but it does not cover that separate helper process, so keeping
+        // this activity visible is the reliable way to keep the listener alive.
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
         statusText = findViewById(R.id.status_text);
         ipText = findViewById(R.id.ip_text);
         warningText = findViewById(R.id.warning_text);
@@ -55,7 +64,21 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        // Recover our own service state after an activity recreation so we do
+        // not mistake our own running server for a third-party port conflict.
+        syncServiceState();
         checkPortConflict();
+    }
+
+    private void syncServiceState() {
+        serviceRunning = AudioService.RUNNING;
+        if (serviceRunning) {
+            statusText.setText("Status: Running on port " + SERVER_PORT);
+            startButton.setText("Stop Server");
+            warningText.setVisibility(android.view.View.GONE);
+        } else {
+            startButton.setText("Start Server");
+        }
     }
 
     private void requestPermissions() {
@@ -93,11 +116,12 @@ public class MainActivity extends Activity {
     }
 
     private void toggleService() {
+        serviceRunning = AudioService.RUNNING;
         if (serviceRunning) {
             stopAudioService();
         } else {
-            // Check for port conflict before starting
-            if (isPortInUse(SERVER_PORT)) {
+            // A port held by our own starting/running service is not a conflict.
+            if (!AudioService.STARTING && isPortInUse(SERVER_PORT)) {
                 warningText.setVisibility(android.view.View.VISIBLE);
                 warningText.setText("WARNING: Port " + SERVER_PORT + " is already in use.\n" +
                     "Kanaha Camera Control may be running.\n" +
@@ -137,7 +161,7 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             boolean inUse = isPortInUse(SERVER_PORT);
             runOnUiThread(() -> {
-                if (inUse && !serviceRunning) {
+                if (inUse && !AudioService.RUNNING && !AudioService.STARTING) {
                     warningText.setVisibility(android.view.View.VISIBLE);
                     warningText.setText("WARNING: Port " + SERVER_PORT + " is in use.\n" +
                         "Kanaha Camera Control appears to be running.\n" +
