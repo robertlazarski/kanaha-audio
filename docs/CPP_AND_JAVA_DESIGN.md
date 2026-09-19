@@ -27,7 +27,7 @@ AudioService (foreground, type=microphone)            └─ audio_search_servic
   deploy config, deploy MCP binary                            ├─ yamnet_bridge_*       → TfLite C API
   CertProvisioning (keypair + CSR)                            ├─ audio_recording_*     → AAudio
   ProcessBuilder ──exec──────────────────────▶                ├─ ltc_decode_*          → libltc
-  read child stdout → logcat                                  └─ audio_sftp_*          → SFTP client
+  read child stdout → logcat                                  └─ audio_sftp_*          → libssh2
 NetworkDiscoveryService (NsdManager mDNS)
                                                libkanaha_mcp.so → files/kanaha-audio-mcp
                                                  same service code, JSON-RPC over stdio
@@ -47,7 +47,7 @@ supervisor Android requires.
 | File | Lines | What it does | Required by Android? |
 |---|---|---|---|
 | `AudioService.java` | ~525 | Foreground service. `startForeground` with a notification, wake lock, deploys the Apache config set and the MCP binary, runs `CertProvisioning`, launches the httpd child with `ProcessBuilder`, mirrors its stdout to logcat, registers mDNS. | The service, the notification and the wake lock: **yes**. The deploy steps and stdout mirror: **no**, convenience. |
-| `MainActivity.java` | ~204 | Requests `RECORD_AUDIO` (and `POST_NOTIFICATIONS` on Android 13+), holds `FLAG_KEEP_SCREEN_ON`, toggles the service, warns when the port is taken, shows the device IP. | The permission prompts: **yes**. The rest: **no**. |
+| `MainActivity.java` | ~204 | Requests `RECORD_AUDIO` and the fine and coarse location permissions, holds `FLAG_KEEP_SCREEN_ON`, toggles the service, warns when the port is taken, shows the device IP. | The permission prompts: **yes**. The rest: **no**. |
 | `NetworkDiscoveryService.java` | ~188 | Advertises `_https._tcp` with `api=kanaha-audio-search` in the TXT record through `NsdManager`. | **No.** A small C mDNS responder would do the same. |
 | `CertProvisioning.java` | ~136 | Mints the device RSA keypair and PKCS#10 CSR on first run (BouncyCastle), reports whether a CA-signed cert has been pushed back. The key never leaves the device. | **No.** The httpd already links OpenSSL; C could mint the same files. |
 
@@ -100,9 +100,11 @@ The same fact is why `adb shell run-as org.kanaha.audio ./files/kanaha-audio-mcp
 can record: `run-as` spawns the binary under the app's UID too, and the
 microphone is allowed as long as the app is in the foreground.
 
-**The runtime permission prompts.** `RECORD_AUDIO` and, since Android 13,
-`POST_NOTIFICATIONS` must be requested through an Activity. There is no native
-API for this.
+**The runtime permission prompts.** `RECORD_AUDIO` and the location
+permissions are requested through an Activity. There is no native API for
+this. The app does not declare or request `POST_NOTIFICATIONS`; on Android 13
+and later the foreground service still runs without it, but its notification
+stays hidden until the user allows notifications for the app in Settings.
 
 **The wake lock.** `PowerManager` is a Java API.
 
@@ -137,7 +139,7 @@ The chain for one request:
 | `yamnet/yamnet_bridge.c` | TensorFlow Lite | `TfLiteModelCreateFromFile`, `TfLiteInterpreterInvoke` | C++ behind the TFLite C API |
 | `recording/audio_recording.c` | AAudio | `AAudioStreamBuilder_*`, data callback | Android NDK, C |
 | `ltc/ltc_decoder.c` | libltc | `ltc_decoder_*` | C |
-| `sftp/audio_sftp.c` | SFTP client | its C API | C |
+| `sftp/audio_sftp.c` | libssh2 | `libssh2_sftp_*` | C |
 
 The bridges are also where the concurrency rule lives. httpd runs a threaded
 MPM and mod_axis2 does not serialise invocations, so `whisper_android_bridge.c`
@@ -153,9 +155,10 @@ which costs nothing, rather than a VM boundary, which costs a marshalling layer
 and a second language.
 
 The compute code has no Android in it beyond `__android_log_print` and AAudio.
-`main.c` compiles with `fprintf` fallbacks off-Android, and the whisper, YAMNet
-and LTC bridges build on a Linux host unchanged, which is where their logic is
-tested.
+The whisper, YAMNet and LTC bridges build on a Linux host unchanged, which is
+where their logic is tested. (`main.c` and `apache_httpd_android.c` are the
+entry point of the earlier hand-rolled server, kept as a desktop test CLI; the
+deployed binary is Apache's own `httpd` with the service linked in.)
 
 ## The MCP binary: zero Java at runtime
 
@@ -185,7 +188,18 @@ libraries that did not exist when the app was written:
 3. Add an `action` branch in `audio_search_service.c` that parses the request,
    calls the bridge, and writes escaped JSON into the fixed response buffer.
 4. Add a schema constant and a table row in `kanaha_mcp.c`.
-5. Add the archive to both link lines in `build-android.sh`.
+5. Add the archive to every link line that produces a shipped binary. There
+   are two scripts, and they do not share a link line:
+
+   | Script | Produces | Ships as |
+   |---|---|---|
+   | `build-httpd-audio.sh` | `httpd-audio`, the real Apache httpd with the service and every DSP library statically linked | `jniLibs/arm64-v8a/libkanaha_audio_httpd.so`, after `llvm-strip` and copy (see `PATH_B_HTTP2_MIGRATION.md`) |
+   | `build-android.sh` | `kanaha-audio-mcp`, and the legacy standalone server `kanaha-audio-httpd` used only as a desktop test CLI | `jniLibs/arm64-v8a/libkanaha_mcp.so` (the script copies it); the legacy server is not installed |
+
+   A library added to `build-android.sh` alone gives a working MCP binary and
+   an httpd that fails to link. `app/src/main/cpp/CMakeLists.txt` is not
+   referenced by the Gradle build; keep it in step only if you use it from an
+   IDE.
 
 Nothing in the Java layer changes unless the library needs a new environment
 variable. A language model through llama.cpp is the next planned instance of
