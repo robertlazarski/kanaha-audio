@@ -391,9 +391,18 @@ int audio_search_service_invoke_json_impl(
         return -1;
     }
 
-    /* Extract action from JSON request */
+    /* Extract the operation from the JSON request.
+     *
+     * Two callers, two spellings. The MCP server sends "action" because that
+     * is what this service has always taken. The HTTP path sends nothing of
+     * the sort: the engine puts the operation from the URL into the request as
+     * "operation" and refuses a body that names a different one, so the URL is
+     * what decides which operation runs. Accept either, "action" first, and do
+     * not make one of them an error - dropping "operation" here breaks every
+     * HTTPS call even though the engine routed it correctly. */
     char action[64];
-    if (!extract_json_string(json_request, "action", action, sizeof(action))) {
+    if (!extract_json_string(json_request, "action", action, sizeof(action))
+        && !extract_json_string(json_request, "operation", action, sizeof(action))) {
         create_error_response(json_response, response_size, "Missing 'action' parameter");
         return -1;
     }

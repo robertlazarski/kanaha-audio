@@ -184,7 +184,10 @@ static char *handle_json_request(const char *request_body) {
         return strdup("{\"error\":\"Parse error\",\"code\":-32700}");
     }
 
-    if (!json_object_object_get_ex(request, "action", &action_obj)) {
+    /* "operation" is what the engine puts in the request from the URL; "action"
+     * is what MCP clients send. Either names the operation to run. */
+    if (!json_object_object_get_ex(request, "action", &action_obj)
+        && !json_object_object_get_ex(request, "operation", &action_obj)) {
         LOGE("Missing action field");
         json_object_put(request);
         return strdup("{\"error\":\"Missing 'action' parameter\",\"code\":-32600}");
