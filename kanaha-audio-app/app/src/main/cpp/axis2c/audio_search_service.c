@@ -453,11 +453,18 @@ int audio_search_service_invoke_json_impl(
 
         LOGI("Searching %d keywords in %s", num_keywords, audio_file);
 
+        /* Optional decoder priming (R2): per call, and cleared afterwards, so
+         * one request cannot change what the next one hears. */
+        char initial_prompt[512] = "";
+        extract_json_string(json_request, "initial_prompt", initial_prompt, sizeof(initial_prompt));
+        whisper_bridge_set_initial_prompt(initial_prompt[0] ? initial_prompt : NULL);
+
         /* Direct function call — no IPC, no process boundary */
         whisper_search_result_t result;
         int rc = whisper_bridge_search_keywords(
             audio_file, keyword_ptrs, num_keywords, &result
         );
+        whisper_bridge_set_initial_prompt(NULL);
 
         if (rc != 0) {
             create_error_response(json_response, response_size,
@@ -507,9 +514,16 @@ int audio_search_service_invoke_json_impl(
             return -1;
         }
 
+        /* Optional decoder priming (R2), same contract as searchKeywords:
+         * in force for this call only. */
+        char initial_prompt[512] = "";
+        extract_json_string(json_request, "initial_prompt", initial_prompt, sizeof(initial_prompt));
+        whisper_bridge_set_initial_prompt(initial_prompt[0] ? initial_prompt : NULL);
+
         whisper_transcribe_result_t result;
         memset(&result, 0, sizeof(result));
         int rc = whisper_bridge_transcribe(audio_file, &result);
+        whisper_bridge_set_initial_prompt(NULL);
 
         if (rc != 0) {
             /* Callee (whisper_bridge_transcribe) is responsible for cleanup on failure.

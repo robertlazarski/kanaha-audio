@@ -157,6 +157,26 @@ Recognition was not the tradeoff it looks like — tiny.en matched a spoken
 magnitude below the whisper path, because it is a small network over a 0.5 s
 hop rather than a transformer over a fixed window.
 
+**Decoder priming, measured 2026-09-21.** `transcribe` and `searchKeywords`
+take an optional `initial_prompt`: a short line the decoder is conditioned on,
+in force for that call only. One 60 s clip of spoken tickers, transcribed four
+ways:
+
+| Model | Prompt | What it heard | Time |
+|---|---|---|---|
+| tiny.en | none | MSFT, AAPL, *Amazon*, JPM, *J&J*, ACWI, *Spy*, UUP | 12.2 s |
+| tiny.en | tickers | unchanged | 14.0 s |
+| base.en | none | *Amazon*, *J&J*, *Spy*; "Portfolio *Variants*" | 27.6 s |
+| base.en | tickers | MSFT AAPL AMZN JPM JNJ ACWI SPY UUP, "variance" | 28.7 s |
+
+**tiny.en ignores the prompt; base.en honours it.** That is worth knowing before
+building on priming: whether it works is a property of the model, not of the
+runtime, and the model that honours it here is the one that costs 2.3× the time.
+The primed base.en run also repeated a phrase and produced "equiluates" for
+"equal weights", so conditioning brings its own artefacts. For a caller that
+only needs the ticker back, mapping *Amazon → AMZN* downstream is cheaper and
+steadier than priming.
+
 **Memory, one MCP process:** 34 MB idle with YAMNet initialised, 137 MB once
 tiny.en is loaded, 268 MB after both have run. On a 4 GB phone that is not a
 constraint; the models on disk (78 MB + 148 MB + 16 MB) cost more than the

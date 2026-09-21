@@ -83,6 +83,20 @@ static char g_current_model[128] = {0};      /* Name of currently loaded model (
 static int g_initialized = 0;                /* 1 after whisper_bridge_init() succeeds */
 static struct whisper_context *g_whisper_ctx = NULL;  /* The loaded whisper model context */
 
+/*
+ * Decoder priming (R2). whisper.cpp will condition a decode on a short piece of
+ * text, which is how you tell it that "MSFT" and "AAPL" are words it might
+ * hear. It is not a vocabulary or a grammar: it biases, it does not constrain,
+ * and a long prompt costs decode budget, so keep it to the names and a sentence
+ * of domain.
+ *
+ * Empty by default, deliberately. A prompt changes what the decoder produces,
+ * and the cue loop's keyword search must not change under anyone's feet; a
+ * caller that wants priming asks for it per call. Measure before trusting it:
+ * priming is known to help some model sizes and do nothing for others.
+ */
+static char g_initial_prompt[512] = {0};
+
 /* ========================================================================
  * WAV file reader — now in audio_util.c (shared with YAMNet bridge)
  *
@@ -103,6 +117,24 @@ static struct whisper_context *g_whisper_ctx = NULL;  /* The loaded whisper mode
  * stderr -- and stderr goes nowhere under Android. Without this, failures
  * inside the library are simply invisible: DTW alignment can fail to
  * initialise and the only symptom is t_dtw coming back as -1 on every token. */
+/*
+ * The prompt in force for the next inference, or NULL for none. Both the
+ * keyword search and the transcription read this through one accessor so they
+ * can never disagree about what was in effect.
+ */
+const char *whisper_bridge_get_initial_prompt(void) {
+    return g_initial_prompt[0] ? g_initial_prompt : NULL;
+}
+
+void whisper_bridge_set_initial_prompt(const char *prompt) {
+    if (!prompt || !prompt[0]) {
+        g_initial_prompt[0] = '\0';
+        return;
+    }
+    snprintf(g_initial_prompt, sizeof(g_initial_prompt), "%s", prompt);
+    LOGI("Decoder prompt set (%zu chars)", strlen(g_initial_prompt));
+}
+
 static void whisper_log_to_android(enum ggml_log_level level, const char *text, void *user_data) {
     (void)user_data;
     if (!text || !*text) return;
@@ -413,6 +445,7 @@ static int whisper_bridge_search_keywords_unlocked(
     wparams.token_timestamps = true;   /* CRITICAL: enables per-token t0/t1 */
     wparams.language         = "en";   /* Force English (skip language detection) */
     wparams.n_threads        = 4;
+    wparams.initial_prompt   = whisper_bridge_get_initial_prompt();
 
     int rc = whisper_full(g_whisper_ctx, wparams, pcmf32, n_samples);
     free(pcmf32);  /* Audio data no longer needed after inference */
@@ -644,6 +677,7 @@ static int whisper_bridge_transcribe_unlocked(
     wparams.token_timestamps = true;
     wparams.language         = "en";
     wparams.n_threads        = 4;
+    wparams.initial_prompt   = whisper_bridge_get_initial_prompt();
 
     /* Run inference — this is the expensive step */
     int rc = whisper_full(g_whisper_ctx, wparams, pcmf32, n_samples);

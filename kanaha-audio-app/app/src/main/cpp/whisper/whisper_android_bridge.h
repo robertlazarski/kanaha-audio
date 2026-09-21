@@ -122,6 +122,22 @@ int whisper_bridge_transcribe(
 );
 
 /**
+ * Set the decoder prompt used by the next transcribe / keyword search (R2).
+ *
+ * whisper.cpp conditions a decode on this text, which is how tickers like
+ * "MSFT" become words it expects to hear. It biases the decoder; it does not
+ * constrain it, and it costs decode budget, so keep it short. Pass NULL or ""
+ * to clear it. Empty by default: the cue loop's behaviour must not change
+ * unless a caller asks for priming.
+ */
+void whisper_bridge_set_initial_prompt(const char *prompt);
+
+/**
+ * The prompt currently in force, or NULL when there is none.
+ */
+const char *whisper_bridge_get_initial_prompt(void);
+
+/**
  * Get status of the whisper bridge.
  *
  * @param json_buffer  Output buffer for JSON status
