@@ -133,3 +133,31 @@ ARM features: NEON=1, FMA=1
 ```
 
 Both implementations produce correct transcriptions with both keyword instances identified.
+
+### Moto G Play 2024 — the $150 phone (measured 2026-09-20)
+
+The Pixel numbers above say what a flagship does. This is the device the room-mic
+role actually runs on: a Snapdragon 680, four A73 cores, 4 GB RAM, Android 14.
+All figures are wall clock from an MCP client on a laptop over WiFi adb, on one
+8.1 s clip recorded by the phone itself.
+
+| Operation | tiny.en | base.en |
+|---|---|---|
+| Model load | 0.2 s | 0.5 s |
+| Transcribe an 8.1 s clip | 3.8–4.5 s | 8.7–8.9 s |
+| `searchKeywords` on the same clip | 3.8–4.9 s | not measured |
+
+**tiny.en is the one to use here.** base.en is 2.3× slower on this hardware,
+which matters because a cue loop is search-bound: whisper pays a fixed 30 s
+window per clip whatever the clip length, so the model's speed *is* the latency.
+Recognition was not the tradeoff it looks like — tiny.en matched a spoken
+"next slide please" at desk distance with confidence 0.76–0.82.
+
+**YAMNet on the same phone:** 37–68 ms for a 3.7 s clip, two orders of
+magnitude below the whisper path, because it is a small network over a 0.5 s
+hop rather than a transformer over a fixed window.
+
+**Memory, one MCP process:** 34 MB idle with YAMNet initialised, 137 MB once
+tiny.en is loaded, 268 MB after both have run. On a 4 GB phone that is not a
+constraint; the models on disk (78 MB + 148 MB + 16 MB) cost more than the
+process does.

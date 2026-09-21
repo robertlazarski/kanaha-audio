@@ -2,7 +2,7 @@
 
 Keyword audio search, instrument detection, SMPTE timecode decoding, microphone recording, SFTP file transfer, and 14 MCP tools for Claude — served from Apache httpd on a phone via [mod_axis2](https://axis.apache.org/axis2/c/core/), a C module that adds JSON-RPC web services to httpd (like mod_ssl adds TLS). No JNI. No Java audio stack. No Intent IPC. The native httpd process opens the microphone, searches audio for spoken phrases, detects instruments, decodes LTC timecode, and SFTPs the results to your workstation. Apache 2.0, so every line can flow upstream.
 
-**What C can do on Android that most people don't realize:** Record audio from a phone microphone (AAudio NDK), run speech-to-text (whisper.cpp) and audio classification (YAMNet/TFLite) in-process, decode professional SMPTE timecode (libltc), transfer files over SSH (libssh2), schedule kernel-level multi-device sync (`clock_nanosleep`), and serve it all over HTTP/2 with mTLS — from a single 24 MB binary, no Java layer involved. Five C libraries statically linked, dispatched through one [weak symbol registry](https://github.com/apache/axis-axis2-c-core/blob/master/docs/HTTP2_ANDROID.md#solution-weak-symbol-architecture). Tested on devices spanning 2017–2026 (Moto X4 through Pixel 10 Pro XL).
+**What C can do on Android that most people don't realize:** Record audio from a phone microphone (AAudio NDK), run speech-to-text (whisper.cpp) and audio classification (YAMNet/TFLite) in-process, decode professional SMPTE timecode (libltc), transfer files over SSH (libssh2), schedule kernel-level multi-device sync (`clock_nanosleep`), and serve it all over HTTP/2 with mTLS — from a single 24 MB binary, no Java layer involved. Five C libraries statically linked, dispatched through one [weak symbol registry](https://github.com/apache/axis-axis2-c-core/blob/master/docs/HTTP2_ANDROID.md#solution-weak-symbol-architecture). Tested on devices spanning 2017–2026: a 2017 Moto X4, a **$150 Moto G Play 2024** (the current room-mic phone), a Pixel 9 Pro and a Pixel 10 Pro XL.
 
 **Why this exists:** [Apache Axis2/C 2.0.0](https://github.com/apache/axis-axis2-c-core) was recently released with HTTP/2, JSON-RPC, and Android support. Kanaha Audio is a showcase application designed to demonstrate that the framework is worth contributing to. See [Axis2/C HTTP/2 on Android](https://github.com/apache/axis-axis2-c-core/blob/master/docs/HTTP2_ANDROID.md) for the technical foundation.
 
@@ -58,7 +58,7 @@ The phones are servers. Your laptop is the client. Bash scripts on a Linux deskt
 ./tools/test-audio-workflow.sh workflow
 
 # Or specify IPs directly:
-# Moto X4 records room audio via built-in mic
+# A budget Android phone (Moto G Play 2024) records room audio via built-in mic
 # Pixel records 4K video + LTC/SMPTE timecode on ch1 via iRig Pro I/O mono
 # All traffic is mTLS (mutual TLS) — both client and server certificates
 # required. The script passes certs to curl automatically.
@@ -175,5 +175,7 @@ All dependencies use permissive or weak-copyleft licenses. Code can flow upstrea
 | [WHISPER_PERFORMANCE.md](docs/WHISPER_PERFORMANCE.md) | Performance expectations, workload sizing, implementation differences |
 | [EDL.md](docs/EDL.md) | EDL generation — automatic edit lists from audio cues (replaces parseLTC.sh magic values) |
 | [MCP.md](docs/MCP.md) | MCP (Model Context Protocol) — 14 audio tools for Claude Desktop |
+| [ANDROID_CROSS_COMPILATION.md](docs/ANDROID_CROSS_COMPILATION.md) | Cross-compiling every dependency for arm64-v8a, and getting the two models onto the phone |
+| [CPP_AND_JAVA_DESIGN.md](docs/CPP_AND_JAVA_DESIGN.md) | Why the audio path is C and the supervisor is Java, and where the line between them sits |
 | [NOTICE](NOTICE) | Third-party attribution |
 | [TRADEMARKS.md](TRADEMARKS.md) | Trademark acknowledgments |

@@ -327,30 +327,46 @@ All of these must be on the link line. The `CMakeLists.txt` and `build-android.s
 The YAMNet `.tflite` model file is not compiled — it's downloaded and pushed to the device.
 
 ```bash
-# Download from TensorFlow Hub
+# Download from TensorFlow Hub (Apache 2.0; the 521-class list is the AudioSet
+# ontology, CC BY 4.0)
 curl -L -o yamnet.tflite \
     "https://tfhub.dev/google/lite-model/yamnet/tflite/1?lite-format=tflite"
 
-# Verify size (~3.7 MB)
-ls -lh yamnet.tflite
+# Verify: 16 MB, and the file starts with the TFL3 magic
+ls -lh yamnet.tflite                 # 16M, verified 2026-09-20
+head -c 8 yamnet.tflite | xxd        # ....TFL3
 
-# Push to device models directory
-adb push yamnet.tflite /data/local/tmp/kanaha-audio/models/
+# Push it where the app can read it. The app's own directory is drwx------,
+# so go via /data/local/tmp and copy with run-as:
+adb push yamnet.tflite /data/local/tmp/
+adb shell run-as org.kanaha.audio cp /data/local/tmp/yamnet.tflite files/models/
+adb shell rm /data/local/tmp/yamnet.tflite
 ```
 
-The service auto-detects `yamnet.tflite` in the models directory at startup. If the file is not present, the service runs in whisper-only mode (the `detectAudioEvents` action returns an error, but all other operations work normally).
+The service auto-detects `yamnet.tflite` in the models directory at startup. If the file is not present, the service runs in whisper-only mode (the `detectAudioEvents` action returns an error, but all other operations work normally); `getStatus` reports which mode you are in as `yamnet_ready`.
+
+**Measured cost of having it, on a Moto G Play 2024 (2026-09-20).** Detection
+takes 37–68 ms for a 3.7 s clip, against 3.8 s for a whisper keyword search on
+the same clip, because YAMNet is a small network over a 0.5 s hop. One MCP
+process sits at 34 MB with YAMNet initialised, 137 MB once `tiny.en` loads, and
+268 MB after both have run. Session start is unchanged. Adding the model does
+not slow anything else down.
 
 ---
 
 ## Step 4: Download Whisper Model
 
 ```bash
-# Download ggml-format model (English-only recommended for keyword search)
-curl -L -o ggml-base.en.bin \
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+# Download ggml-format model (English-only recommended for keyword search).
+# tiny.en (78 MB) is the one to start with: on a Moto G Play 2024 it
+# transcribes an 8 s clip in 3.8-4.5 s against base.en's (148 MB) 8.7-8.9 s.
+curl -L -o ggml-tiny.en.bin \
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
 
-# Push to device
-adb push ggml-base.en.bin /data/local/tmp/kanaha-audio/models/
+# Push it, again via /data/local/tmp because the app directory is drwx------
+adb push ggml-tiny.en.bin /data/local/tmp/
+adb shell run-as org.kanaha.audio cp /data/local/tmp/ggml-tiny.en.bin files/models/
+adb shell rm /data/local/tmp/ggml-tiny.en.bin
 ```
 
 See [WHISPER_MODELS.md](WHISPER_MODELS.md) for model tier comparison and performance benchmarks on Pixel 9 Pro.
@@ -380,6 +396,13 @@ Three targets are built:
 3. `libkanaha_audio_mcp.so` — MCP stdio executable (launched by Claude Desktop)
 
 ### Verify on Device
+
+This is the **standalone-binary** route: the server runs as the shell user out of
+`/data/local/tmp`, with its own models and audio directories there. It is for
+testing the C build without the APK. The **app** route is different — the app's
+data directory is `drwx------`, so its models live in `files/models` and you put
+them there with `run-as` (Steps 3 and 4). Do not mix the two paths up when a
+model appears to be missing.
 
 ```bash
 # Push the binary

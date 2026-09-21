@@ -27,7 +27,7 @@ These values change every session. Get them wrong and the video is broken.
 
 ## The Solution
 
-Replace magic values with audio detection. A second phone (e.g., a Moto X4) sits in the room recording audio. Kanaha Audio analyzes that recording and finds the edit points automatically:
+Replace magic values with audio detection. A second phone (e.g., a Moto G Play 2024, about $150) sits in the room recording audio. Kanaha Audio analyzes that recording and finds the edit points automatically:
 
 - **"When does the show start?"** → YAMNet detects music (e.g., saxophone starts playing)
 - **"When to cut to a slide?"** → whisper.cpp detects "next slide please"
@@ -40,7 +40,7 @@ Replace magic values with audio detection. A second phone (e.g., a Moto X4) sits
 A phone running Kanaha Audio records the room with its built-in microphone:
 
 ```bash
-# Start recording on the Moto X4
+# Start recording on the room-mic phone
 curl -sk --http2 \
   --cert client.crt --key client.key --cacert ca.crt \
   -H "Content-Type: application/json" \
@@ -226,7 +226,7 @@ The silent audio track is required — without it, ffmpeg concat produces broken
 #!/bin/bash
 # Full example: record → analyze → generate EDL → assemble video
 
-MOTO=192.168.8.126    # Moto X4 running Kanaha Audio (room mic)
+MOTO=192.168.8.126    # room-mic phone running Kanaha Audio (a Moto G Play 2024 here)
 PIXEL=192.168.8.159   # Pixel 10 Pro XL running Kanaha Camera (video)
 SSL=~/kanaha-certs   # your CA dir: client.crt, client.key, ca.crt
 CURL="curl -sk --http2 --cert $SSL/client.crt --key $SSL/client.key --cacert $SSL/ca.crt -H Content-Type:application/json"
