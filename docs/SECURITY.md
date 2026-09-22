@@ -33,8 +33,35 @@ kanaha-audio-httpd -p 8443 \
 
 Uses the same Kanaha CA as the other apps (one trust anchor). The device mints
 its own key + CSR on first run and is provisioned with a CA-signed cert; the CA
-key lives off-device (never in the repo or APK). See the Kanaha Camera docs for
-the provisioning flow.
+key lives off-device (never in the repo or APK).
+
+### Bringing up a new phone
+
+**The server will not start until the device is provisioned, and it is quiet
+about it.** On first run the app writes `files/csr/audio.csr` and stops there;
+the notification reads "Awaiting provisioning" and the only other trace is one
+line in logcat:
+
+```
+W KanahaAudioService: Not provisioned; server not started. Run: kanaha-provision.sh <serial> audio
+```
+
+Nothing is wrong with the phone — the port is simply closed. Sign the CSR with
+the CA off-device and copy the signed cert plus the CA cert into
+`files/apache/ssl/` as `server.crt` and `ca.crt` (the app directory is
+`drwx------`, so stage through `/data/local/tmp` and copy with `run-as`), then
+restart the service. The private key never leaves the phone: only the CSR comes
+off it, and only a certificate goes back.
+
+Two things worth knowing before the first curl:
+
+- **Name the cert the way you will call it.** A cert carrying only
+  `DNS:audio.local` forces `--resolve` on every request; one carrying the
+  phone's address does not, but then a DHCP change means re-provisioning.
+- **MCP needs none of this.** The stdio binary runs under `run-as` over adb and
+  never touches httpd or TLS, so an unprovisioned phone can still record,
+  transcribe and speak. That is a quick way to tell a certificate problem from
+  an app problem.
 
 ## HTTP/2 DoS Hardening (CVE-2026-49975)
 

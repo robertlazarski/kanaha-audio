@@ -14,20 +14,24 @@ Claude Desktop (or any MCP client)
     ├─ JSON-RPC 2.0 over stdio
     │
     ▼
-kanaha-audio-mcp (11 MB native binary: whisper.cpp + TFLite statically linked)
+kanaha-audio-mcp (15 MB native binary: whisper.cpp + TFLite + flite statically linked)
     │
     ├─ initialize    → protocol handshake
-    ├─ tools/list    → 14 audio tool catalog
+    ├─ tools/list    → 15 audio tool catalog
     └─ tools/call    → dispatches to audio_search_service_invoke_json_impl()
                           │
                           ├─ whisper.cpp    (speech-to-text, keyword search)
                           ├─ YAMNet/TFLite  (audio event detection)
                           ├─ AAudio NDK     (microphone recording, tone playback)
+                          ├─ flite          (speech synthesis, `speak`)
                           ├─ libltc         (SMPTE/LTC timecode decoding)
                           └─ libssh2        (SFTP file transfer)
 ```
 
-No network connection needed — MCP runs on the device itself.
+No network connection needed — MCP runs on the device itself. Nor does it need
+the HTTPS server: `AudioService` copies the binary into `files/` when it starts,
+and the MCP path needs neither httpd nor a provisioned certificate. A phone that
+refuses to serve port 8443 will still answer every tool here.
 
 ## Tools
 
