@@ -474,6 +474,8 @@ static int whisper_bridge_search_keywords_unlocked(
         int64_t t0;             /* Start time in milliseconds */
         int64_t t1;             /* End time in milliseconds */
         int64_t t_dtw;          /* DTW-aligned instant, ms; -1 when unavailable */
+        float p_sum;            /* Probability summed over the pieces of this word */
+        int n_pieces;           /* How many tokens were joined to make it */
         float p;                /* Token probability from whisper */
     } token_info_t;
 
@@ -495,16 +497,43 @@ static int whisper_bridge_search_keywords_unlocked(
             /* Skip special tokens — whisper emits [_BEG_], <|en|>, etc. */
             if (text[0] == '[' || text[0] == '<') continue;
 
+            /* Whisper's vocabulary is sub-word, and it marks a word START with
+             * a leading space: "portfolio" arrives as " Port" + "folio", while
+             * "Microsoft" happens to be one token. Matching token by token
+             * therefore found "microsoft" and never "portfolio" — silently, and
+             * only for the longer words, which is the worst way for it to fail.
+             * The leading space is the only signal available here, so it is read
+             * before the text is cleaned (cleaning strips it). */
+            int starts_word = isspace((unsigned char)text[0]);
+
             /* Get timestamp and probability data for this token */
             whisper_token_data tdata =
                 whisper_full_get_token_data(g_whisper_ctx, seg, tok);
 
             /* Clean the token text: " Next," → "next" */
-            strip_for_matching(text, tokens[total_tokens].word,
-                              sizeof(tokens[total_tokens].word));
+            char piece[128];
+            strip_for_matching(text, piece, sizeof(piece));
 
             /* Skip if the token was only whitespace/punctuation */
-            if (tokens[total_tokens].word[0] == '\0') continue;
+            if (piece[0] == '\0') continue;
+
+            if (!starts_word && total_tokens > 0) {
+                /* A continuation: glue it onto the word being built. The word
+                 * keeps its first piece's start, takes this piece's end, and
+                 * averages probability across the pieces, so a word assembled
+                 * from three tokens is not scored by whichever one came last. */
+                token_info_t *w = &tokens[total_tokens - 1];
+                strncat(w->word, piece, sizeof(w->word) - strlen(w->word) - 1);
+                w->t1 = tdata.t1 * 10;
+                w->p_sum += tdata.p;
+                w->n_pieces++;
+                w->p = w->p_sum / w->n_pieces;
+                continue;
+            }
+
+            strncpy(tokens[total_tokens].word, piece,
+                    sizeof(tokens[total_tokens].word) - 1);
+            tokens[total_tokens].word[sizeof(tokens[total_tokens].word) - 1] = '\0';
 
             /* Convert whisper's 10ms units to milliseconds */
             tokens[total_tokens].t0 = tdata.t0 * 10;
@@ -513,12 +542,14 @@ static int whisper_bridge_search_keywords_unlocked(
              * token; keep the sentinel rather than scaling it into a real time. */
             tokens[total_tokens].t_dtw = (tdata.t_dtw < 0) ? -1 : tdata.t_dtw * 10;
             tokens[total_tokens].p  = tdata.p;
+            tokens[total_tokens].p_sum = tdata.p;
+            tokens[total_tokens].n_pieces = 1;
 
             total_tokens++;
         }
     }
 
-    LOGI("Collected %d tokens for keyword matching", total_tokens);
+    LOGI("Collected %d words for keyword matching", total_tokens);
 
     /* ── Step 4: Sliding window keyword phrase matching ───────── */
     /*
