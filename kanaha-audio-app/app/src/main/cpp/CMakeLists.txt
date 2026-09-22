@@ -253,6 +253,28 @@ if(USE_CROSS_COMPILED_LIBS)
     # Convenience variable: all TFLite libraries in link order.
     # tensorflowlite_c → tensorflow-lite → XNNPACK/ruy/abseil/etc.
     # Used by all three targets (shared lib, httpd, MCP).
+    # flite (CMU, BSD) — in-process speech synthesis for the `speak` operation.
+    # Link order matters: the voice pulls in the lexicon and the letter-to-sound
+    # rules, and all three pull in the core, so the core goes last.
+    add_library(flite_cmu_us_kal16 STATIC IMPORTED)
+    set_target_properties(flite_cmu_us_kal16 PROPERTIES IMPORTED_LOCATION ${DEPS_LIB_DIR}/libflite_cmu_us_kal16.a)
+
+    add_library(flite_usenglish STATIC IMPORTED)
+    set_target_properties(flite_usenglish PROPERTIES IMPORTED_LOCATION ${DEPS_LIB_DIR}/libflite_usenglish.a)
+
+    add_library(flite_cmulex STATIC IMPORTED)
+    set_target_properties(flite_cmulex PROPERTIES IMPORTED_LOCATION ${DEPS_LIB_DIR}/libflite_cmulex.a)
+
+    add_library(flite STATIC IMPORTED)
+    set_target_properties(flite PROPERTIES IMPORTED_LOCATION ${DEPS_LIB_DIR}/libflite.a)
+
+    set(FLITE_LIBS
+        flite_cmu_us_kal16
+        flite_usenglish
+        flite_cmulex
+        flite
+    )
+
     set(TFLITE_LIBS
         tensorflowlite_c
         tensorflow-lite
@@ -300,6 +322,7 @@ set(KANAHA_SOURCES
     recording/audio_tone.c
     recording/audio_sidecar.c
     recording/gps_reader.c
+    speech/audio_speak.c
 )
 
 # Axis2/C adapter + MCP only compiled for the full cross-compiled build (arm64)
@@ -386,6 +409,9 @@ if(USE_CROSS_COMPILED_LIBS)
 
         # TensorFlow Lite + deps (YAMNet audio event detection)
         ${TFLITE_LIBS}
+
+        # flite (speech synthesis for `speak`)
+        ${FLITE_LIBS}
     )
 
     # Android 15 (API 35) requires 16KB page aligned ELF segments
@@ -464,6 +490,9 @@ if(USE_CROSS_COMPILED_LIBS)
         ggml-base
         # TensorFlow Lite + deps (YAMNet)
         ${TFLITE_LIBS}
+
+        # flite (speech synthesis for `speak`)
+        ${FLITE_LIBS}
     )
 
     target_link_options(kanaha_audio_httpd.so PRIVATE
@@ -490,6 +519,7 @@ if(USE_CROSS_COMPILED_LIBS)
         recording/audio_tone.c
         recording/audio_sidecar.c
         recording/gps_reader.c
+        speech/audio_speak.c
     )
 
     set_target_properties(kanaha_audio_mcp.so PROPERTIES
@@ -517,6 +547,9 @@ if(USE_CROSS_COMPILED_LIBS)
         ggml-base
         # TensorFlow Lite + deps (YAMNet)
         ${TFLITE_LIBS}
+
+        # flite (speech synthesis for `speak`)
+        ${FLITE_LIBS}
     )
 
     target_link_options(kanaha_audio_mcp.so PRIVATE

@@ -183,6 +183,17 @@ static const char SCHEMA_STOP_RECORDING[] =
     "\"description\":\"No parameters required. Stops the active recording and finalizes the WAV file.\""
     "}";
 
+static const char SCHEMA_SPEAK[] =
+    "{"
+    "\"type\":\"object\","
+    "\"properties\":{"
+        "\"text\":{\"type\":\"string\","
+            "\"description\":\"What to say on this device's speaker, at most 500 characters. "
+                "Synthesised in-process; nothing is uploaded and no network is used\"}"
+    "},"
+    "\"required\":[\"text\"]"
+    "}";
+
 static const char SCHEMA_PLAY_TONE[] =
     "{"
     "\"type\":\"object\","
@@ -319,6 +330,16 @@ static const kanaha_mcp_tool_t kanaha_mcp_tools[] = {
         "synchronization (audio slate). Supports start_at scheduling for "
         "kernel-level precision timing across devices.",
         SCHEMA_PLAY_TONE
+    },
+    {
+        "speak",
+        "Say a line of text on this device's speaker. Synthesis runs in-process (flite, "
+        "BSD) so nothing is uploaded and no network is touched. Meant for reading a "
+        "resolved request back to the person standing next to the phone before anything "
+        "runs, which is the only way a spoken confirmation means they agreed with the "
+        "specification rather than merely heard a beep. The voice is a 16 kHz diphone "
+        "voice: intelligible, not pretty.",
+        SCHEMA_SPEAK
     },
     {
         "listRecordings",

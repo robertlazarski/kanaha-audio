@@ -22,6 +22,7 @@ Kanaha Audio is licensed under the Apache License 2.0. All dependencies use perm
 | json-c | MIT | Category A | JSON parsing |
 | Expat | MIT | Category A | XML parsing |
 | libssh2 | BSD 3-Clause | Category A | SFTP file transfer |
+| flite | BSD-style (CMU) | Category A | In-process speech synthesis (`speak`) |
 | **libltc** | **LGPL-3.0** | **Category B** | SMPTE/LTC timecode decoding |
 | AAudio | Android system lib | N/A | Microphone recording, speaker output |
 
@@ -72,7 +73,7 @@ The following are trademarks of their respective owners:
 | File | Purpose |
 |------|---------|
 | `LICENSE` | Apache License 2.0 full text |
-| `NOTICE` | Attribution for all third-party components (12 dependencies) |
+| `NOTICE` | Attribution for all third-party components (13 dependencies) |
 | `TRADEMARKS.md` | Trademark acknowledgments and independence statement |
 
 ## Summary

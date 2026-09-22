@@ -112,6 +112,15 @@
             <parameter name="contentType">application/json</parameter>
         </operation>
 
+        <operation name="speak">
+            <parameter name="mcpDescription">Say a line of text on this device's speaker. Synthesis is in-process (flite, BSD): nothing is uploaded and no network is touched. Meant for reading a resolved request back to the person holding the phone before anything runs.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"text":{"type":"string","description":"What to say. 500 characters maximum."}},"required":["text"]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/speak</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
         <operation name="listRecordings">
             <parameter name="mcpDescription">List WAV recordings with file sizes and estimated durations.</parameter>
             <parameter name="mcpInputSchema">{"type":"object","properties":{},"required":[]}</parameter>

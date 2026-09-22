@@ -39,6 +39,7 @@ No network connection needed — MCP runs on the device itself.
 | `startRecording` | Record from microphone to WAV (optional `start_at` scheduling) |
 | `stopRecording` | Stop recording, finalize WAV |
 | `playTone` | Sine wave through speaker (sync slate, `start_at` support) |
+| `speak` | Say a line of text on the device's speaker (flite, in-process) |
 | `listRecordings` | List WAV recordings with sizes and durations |
 | `getStatus` | Model state, recording state, device info |
 | `listModels` | Available whisper models on device |

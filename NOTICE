@@ -43,6 +43,17 @@ Kanaha Audio uses libssh2 for SFTP file transfer with ed25519
 SSH key authentication.
 
 =============================================================================
+flite
+=============================================================================
+Copyright (c) 1999-2016 Carnegie Mellon University
+http://www.festvox.org/flite/
+License: BSD-style (4-clause-free, MIT-compatible)
+
+Kanaha Audio uses flite for in-process speech synthesis: the `speak`
+operation says a line of text on the device's own speaker. The
+cmu_us_kal16 diphone voice is linked in.
+
+=============================================================================
 libltc
 =============================================================================
 Copyright (C) 2006-2024 Robin Gareus

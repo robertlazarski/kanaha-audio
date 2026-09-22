@@ -50,6 +50,7 @@
 #include "../yamnet/yamnet_bridge.h"
 #include "../recording/audio_recording.h"
 #include "../recording/audio_tone.h"
+#include "../speech/audio_speak.h"
 #include "../recording/audio_sidecar.h"
 #include "../recording/gps_reader.h"
 #include "../sftp/audio_sftp.h"
@@ -923,6 +924,36 @@ int audio_search_service_invoke_json_impl(
      * Use case: send the same start_at to multiple devices for
      * synchronized audio slate across phone + laptop.
      * ================================================================ */
+    else if (strcmp(action, "speak") == 0) {
+        /* Say a line of text on this device (R4a read-back). Synthesis is
+         * in-process flite; nothing here reaches the filesystem or the network,
+         * and the only input is the text itself. */
+        char text[AUDIO_SPEAK_MAX_TEXT + 1] = "";
+        if (!extract_json_string(json_request, "text", text, sizeof(text)) || text[0] == '\0') {
+            create_error_response(json_response, response_size,
+                                  "Missing required field: text");
+            return -1;
+        }
+
+        const char *audio_dir = audio_recording_get_audio_dir();
+        if (!audio_dir) {
+            create_error_response(json_response, response_size,
+                                  "Audio directory is not initialised");
+            return -1;
+        }
+
+        audio_speak_result_t spoken;
+        if (audio_speak_text(text, audio_dir, &spoken) != 0) {
+            create_error_response(json_response, response_size,
+                                  "Speech synthesis or playback failed");
+            return -1;
+        }
+
+        safe_snprintf(json_response, response_size, 0,
+                      "{\"success\":true,\"duration_ms\":%d,\"sample_rate\":%d,"
+                      "\"voice\":\"cmu_us_kal16\"}",
+                      spoken.duration_ms, spoken.sample_rate);
+    }
     else if (strcmp(action, "playTone") == 0) {
         int frequency = (int)extract_json_float(json_request, "frequency", 0.0f);
         int duration_ms = (int)extract_json_float(json_request, "duration_ms", 0.0f);

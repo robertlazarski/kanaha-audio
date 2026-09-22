@@ -40,6 +40,7 @@ SERVICE_SRCS=(
   "$SRC/yamnet/yamnet_bridge.c"
   "$SRC/recording/audio_recording.c"
   "$SRC/recording/audio_tone.c"
+  "$SRC/speech/audio_speak.c"
   "$SRC/recording/audio_sidecar.c"
   "$SRC/recording/gps_reader.c"
   "$SRC/sftp/audio_sftp.c"
@@ -115,6 +116,7 @@ $CXX -fPIC -o httpd-audio modules.o buildmark.o \
   -lruy_tune -lruy_cpuinfo -lruy_thread_pool \
   -lruy_blocking_counter -lruy_wait -lruy_denormal \
   -lruy_profiler_instrumentation \
+  -lflite_cmu_us_kal16 -lflite_usenglish -lflite_cmulex -lflite \
   -laaudio \
   $DEPS/lib/libaprutil-1.a \
   $DEPS/lib/libexpat.a \

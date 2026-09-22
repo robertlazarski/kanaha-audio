@@ -14,6 +14,7 @@ Kanaha Audio is a dual-model audio analysis service running on Android. Both ML 
 | TensorFlow Lite C API | ML inference runtime (YAMNet) | libtensorflowlite_c.a, libtensorflow-lite.a | ~10 MB |
 | TFLite deps (XNNPACK, ruy, abseil, etc.) | Optimized CPU kernels + utilities | ~30 .a files | ~25 MB |
 | FlatBuffers (host) | Schema compiler for TFLite build | flatc (host binary) | ~4.5 MB |
+| flite + cmu_us_kal16 voice | Speech synthesis for the `speak` operation | libflite.a, libflite_usenglish.a, libflite_cmulex.a, libflite_cmu_us_kal16.a | ~6.8 MB |
 
 The shared dependencies (Apache httpd, Axis2/C, OpenSSL, nghttp2, APR, json-c) are documented in the [Kanaha Camera cross-compilation guide](../../kanaha/docs/ANDROID_CROSS_COMPILATION.md) and are reused by Kanaha Audio from the same `~/android-cross-builds/deps/arm64-v8a/` directory.
 
@@ -322,7 +323,68 @@ All of these must be on the link line. The `CMakeLists.txt` and `build-android.s
 
 ---
 
-## Step 3: Download YAMNet Model
+## Step 3: Cross-Compile flite (speech synthesis)
+
+flite is CMU's small speech synthesiser: BSD-licensed C with no dependencies,
+which is why the `speak` operation uses it instead of Android's `TextToSpeech`.
+The Java API would mean JNI or Intent IPC, and this app exists to show that none
+of that is needed.
+
+```bash
+cd ~/android-cross-builds
+curl -L -o flite-2.2.tar.gz \
+    "https://github.com/festvox/flite/archive/refs/tags/v2.2.tar.gz"
+tar xf flite-2.2.tar.gz && cd flite-2.2
+
+export NDK=$HOME/Android/Sdk/ndk/28.0.12916984
+export TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+export CC=$TOOLCHAIN/bin/aarch64-linux-android21-clang
+export AR=$TOOLCHAIN/bin/llvm-ar
+export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+
+./configure --host=aarch64-linux-android --build=x86_64-linux-gnu \
+    --with-audio=none \
+    --prefix=$HOME/android-cross-builds/deps/arm64-v8a
+make
+```
+
+`--with-audio=none` matters: flite would otherwise look for ALSA or OSS, and
+neither exists on Android. Playback is not its job here — the service writes the
+synthesised WAV and hands it to the AAudio path that already serves `playTone`
+and `playAudio`.
+
+**Expect `make` to fail at the end**, while linking flite's own host-side command
+line tools: they define a symbol that collides with Bionic's `atoi`. The static
+libraries are already built by then, and they are all this project needs. Install
+them by hand rather than with `make install`, which would try the tools again:
+
+```bash
+DEPS=$HOME/android-cross-builds/deps/arm64-v8a
+cp build/aarch64-linux-android/lib/libflite.a \
+   build/aarch64-linux-android/lib/libflite_usenglish.a \
+   build/aarch64-linux-android/lib/libflite_cmulex.a \
+   build/aarch64-linux-android/lib/libflite_cmu_us_kal16.a "$DEPS/lib/"
+mkdir -p "$DEPS/include/flite"
+cp include/*.h "$DEPS/include/flite/"
+
+# Verify: ARM64 archives, ~6.8 MB together, most of it the voice
+ls -lh "$DEPS"/lib/libflite*.a
+```
+
+Only four of the archives flite builds are installed. The rest are other voices
+and other languages; `cmu_us_kal16` is the 16 kHz diphone voice, which matches
+the sample rate this app records and plays at. It sounds like 1998 — for reading
+five tickers back to the person holding the phone, that is the right trade.
+
+**Link order matters.** The voice pulls in the lexicon and the letter-to-sound
+rules, and all three pull in the core, so the core goes last:
+`-lflite_cmu_us_kal16 -lflite_usenglish -lflite_cmulex -lflite`. Both
+`build-android.sh` and `build-httpd-audio.sh` carry that line; a library added to
+one and not the other builds one binary and breaks the other.
+
+---
+
+## Step 4: Download YAMNet Model
 
 The YAMNet `.tflite` model file is not compiled — it's downloaded and pushed to the device.
 
@@ -354,7 +416,7 @@ not slow anything else down.
 
 ---
 
-## Step 4: Download Whisper Model
+## Step 5: Download Whisper Model
 
 ```bash
 # Download ggml-format model (English-only recommended for keyword search).
@@ -373,7 +435,7 @@ See [WHISPER_MODELS.md](WHISPER_MODELS.md) for model tier comparison and perform
 
 ---
 
-## Step 5: Build Kanaha Audio
+## Step 6: Build Kanaha Audio
 
 With all dependencies cross-compiled and installed in `~/android-cross-builds/deps/arm64-v8a/`, you can build the Kanaha Audio native binary.
 
