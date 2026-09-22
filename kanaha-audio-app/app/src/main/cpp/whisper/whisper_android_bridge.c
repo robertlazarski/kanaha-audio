@@ -347,6 +347,36 @@ static void strip_for_matching(const char *input, char *output, size_t out_size)
     }
 }
 
+/*
+ * How much of whisper's encoder window to actually run, for TRANSCRIPTION ONLY.
+ *
+ * The encoder is a fixed 30-second window: a 12-second clip costs the same as a
+ * 30-second one. audio_ctx caps it at the part of the window the audio occupies
+ * -- 1500 positions cover 30 s, so 50 per second -- and on this phone that
+ * halved a 12-second transcription, 7.6 s to 3.8 s.
+ *
+ * It is not free. At a 25 % margin that same clip came back with "Portfolio
+ * Variants" where the full window heard "Portfolio variance": less context makes
+ * the decoder likelier to pick the commoner word. That is tolerable here because
+ * a transcript is read by a model resolving intent, which has absorbed worse
+ * ("vowel" for "vol", "the whole variance" for "the covariance"). It is NOT
+ * tolerable for keyword search, which compares words literally, so that path
+ * keeps the whole window.
+ *
+ * The margin is therefore generous rather than aggressive: half again as much
+ * context as the audio needs, never below 768. Zero means "use everything",
+ * which is what anything past about twenty seconds gets anyway.
+ */
+static int audio_ctx_for(int n_samples, int sample_rate) {
+    if (n_samples <= 0 || sample_rate <= 0) return 0;
+    double seconds = (double)n_samples / (double)sample_rate;
+    int ctx = (int)(seconds * 50.0 * 1.5) + 128;
+    ctx = (ctx + 63) / 64 * 64;          /* keep it a round number of positions */
+    if (ctx < 768) ctx = 768;
+    if (ctx >= 1500) return 0;           /* long enough to need all of it */
+    return ctx;
+}
+
 /* ========================================================================
  * Keyword search — the core operation for parseLTC.sh integration
  *
@@ -446,6 +476,10 @@ static int whisper_bridge_search_keywords_unlocked(
     wparams.language         = "en";   /* Force English (skip language detection) */
     wparams.n_threads        = 4;
     wparams.initial_prompt   = whisper_bridge_get_initial_prompt();
+    /* Keyword search deliberately keeps the full encoder window. Matching is
+     * exact word against exact word, so a transcript that degrades by one
+     * syllable is a trigger that never fires, and nobody can tell it was
+     * heard at all. The cost is paid here, where it can be seen. */
 
     int rc = whisper_full(g_whisper_ctx, wparams, pcmf32, n_samples);
     free(pcmf32);  /* Audio data no longer needed after inference */
@@ -709,6 +743,7 @@ static int whisper_bridge_transcribe_unlocked(
     wparams.language         = "en";
     wparams.n_threads        = 4;
     wparams.initial_prompt   = whisper_bridge_get_initial_prompt();
+    wparams.audio_ctx        = audio_ctx_for(n_samples, sample_rate);
 
     /* Run inference — this is the expensive step */
     int rc = whisper_full(g_whisper_ctx, wparams, pcmf32, n_samples);
