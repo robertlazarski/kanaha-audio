@@ -38,3 +38,18 @@ local.properties
 # OS files
 .DS_Store
 Thumbs.db
+
+# Demo and rehearsal scripts — kept outside every repo on purpose.
+#
+# The voice loop, its orchestrator prompt, the named books and the rehearsal
+# transcripts are operator material: they name files, phones and portfolios that
+# belong to a demonstration rather than to this project. They live in the
+# operator's own working directory, and these rules exist so that a stray copy
+# in the tree cannot be staged by accident.
+kanaha-voice-*.py
+kanaha-books.json
+kanaha-*-prompt.md
+kanaha-mcp.generated.json
+kanaha-spec-replay.py
+transcripts.jsonl
+demo-local/
