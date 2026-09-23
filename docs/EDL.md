@@ -27,7 +27,7 @@ These values change every session. Get them wrong and the video is broken.
 
 ## The Solution
 
-Replace magic values with audio detection. A second phone (e.g., a Moto G Play 2024, about $150) sits in the room recording audio. Kanaha Audio analyzes that recording and finds the edit points automatically:
+Replace magic values with audio detection. A second phone (e.g., a Moto G Play 2024, about $99) sits in the room recording audio. Kanaha Audio analyzes that recording and finds the edit points automatically:
 
 - **"When does the show start?"** → YAMNet detects music (e.g., saxophone starts playing)
 - **"When to cut to a slide?"** → whisper.cpp detects "next slide please"

@@ -134,7 +134,7 @@ ARM features: NEON=1, FMA=1
 
 Both implementations produce correct transcriptions with both keyword instances identified.
 
-### Moto G Play 2024 — the $150 phone (measured 2026-09-20)
+### Moto G Play 2024 — the $99 phone (measured 2026-09-20)
 
 The Pixel numbers above say what a flagship does. This is the device the room-mic
 role actually runs on: a Snapdragon 680, four A73 cores, 4 GB RAM, Android 14.
