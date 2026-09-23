@@ -99,6 +99,13 @@ int whisper_bridge_load_model(const char *model_name);
  * @param audio_file   Path to the audio file
  * @param keywords     Array of keyword strings to search for
  * @param num_keywords Number of keywords
+ * @param initial_prompt Decoder priming for this call only (R2), or NULL /
+ *                     "" for none. whisper.cpp conditions the decode on it,
+ *                     which is how tickers like "MSFT" become words it expects;
+ *                     it biases, it does not constrain, and it costs decode
+ *                     budget, so keep it short. Passed per call and applied
+ *                     under the bridge lock, so concurrent requests cannot see
+ *                     each other's prompt.
  * @param result       Output: search results (caller provides storage)
  * @return 0 on success, -1 on failure
  */
@@ -106,6 +113,7 @@ int whisper_bridge_search_keywords(
     const char *audio_file,
     const char **keywords,
     int num_keywords,
+    const char *initial_prompt,
     whisper_search_result_t *result
 );
 
@@ -113,29 +121,15 @@ int whisper_bridge_search_keywords(
  * Transcribe an audio file with word-level timestamps.
  *
  * @param audio_file  Path to the audio file
+ * @param initial_prompt As for whisper_bridge_search_keywords.
  * @param result      Output: transcription result (caller must free result->text)
  * @return 0 on success, -1 on failure
  */
 int whisper_bridge_transcribe(
     const char *audio_file,
+    const char *initial_prompt,
     whisper_transcribe_result_t *result
 );
-
-/**
- * Set the decoder prompt used by the next transcribe / keyword search (R2).
- *
- * whisper.cpp conditions a decode on this text, which is how tickers like
- * "MSFT" become words it expects to hear. It biases the decoder; it does not
- * constrain it, and it costs decode budget, so keep it short. Pass NULL or ""
- * to clear it. Empty by default: the cue loop's behaviour must not change
- * unless a caller asks for priming.
- */
-void whisper_bridge_set_initial_prompt(const char *prompt);
-
-/**
- * The prompt currently in force, or NULL when there is none.
- */
-const char *whisper_bridge_get_initial_prompt(void);
 
 /**
  * Get status of the whisper bridge.
