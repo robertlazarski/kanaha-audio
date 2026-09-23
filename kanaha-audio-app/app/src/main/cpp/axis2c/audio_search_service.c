@@ -51,6 +51,9 @@
 #include "../recording/audio_recording.h"
 #include "../recording/audio_tone.h"
 #include "../speech/audio_speak.h"
+#ifdef KANAHA_VOICE
+#include "../voice/kanaha_voice.h"
+#endif
 #include "../recording/audio_sidecar.h"
 #include "../recording/gps_reader.h"
 #include "../sftp/audio_sftp.h"
@@ -973,6 +976,29 @@ int audio_search_service_invoke_json_impl(
                       "\"voice\":\"cmu_us_kal16\"}",
                       spoken.duration_ms, spoken.sample_rate);
     }
+#ifdef KANAHA_VOICE
+    /* ================================================================
+     * voiceRequest - one transcript through the on-device voice path:
+     * resolve, call Kanaha Calcs on the other phone over HTTP/2 + mTLS,
+     * word the answer, and with "speak":true say it on this speaker.
+     * The same path the voice loop takes for each dictated clip; called
+     * directly it is a typed request, which is how it is tested.
+     * ================================================================ */
+    else if (strcmp(action, "voiceRequest") == 0) {
+        char text[1024] = "";
+        int speak = strstr(json_request, "\"speak\":true") != NULL ||
+                    strstr(json_request, "\"speak\": true") != NULL;
+        if (!extract_json_string(json_request, "text", text, sizeof(text)) || text[0] == '\0') {
+            create_error_response(json_response, response_size, "Missing required field: text");
+            return -1;
+        }
+        return kanaha_voice_request(text, speak, json_response, response_size);
+    }
+    else if (strcmp(action, "voiceReset") == 0) {
+        kanaha_voice_reset();
+        safe_snprintf(json_response, response_size, 0, "{\"success\":true}");
+    }
+#endif
     else if (strcmp(action, "playTone") == 0) {
         int frequency = (int)extract_json_float(json_request, "frequency", 0.0f);
         int duration_ms = (int)extract_json_float(json_request, "duration_ms", 0.0f);
@@ -1296,6 +1322,13 @@ int audio_search_service_init(const char *models_dir) {
     char audio_dir[1024];
     snprintf(audio_dir, sizeof(audio_dir), "%s/../audio", models_dir);
     audio_recording_init(audio_dir);
+#ifdef KANAHA_VOICE
+    {
+        char files_dir[1024];
+        snprintf(files_dir, sizeof(files_dir), "%s/..", models_dir);
+        kanaha_voice_init(files_dir);
+    }
+#endif
 
     /* Initialize SFTP subsystem.
      * SSH config goes to a sibling "ssh" directory next to "models". */

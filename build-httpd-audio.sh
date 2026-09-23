@@ -17,12 +17,16 @@ CXX=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang
 AR=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
 
 SRC=$HOME/repos/kanaha-audio/kanaha-audio-app/app/src/main/cpp
+# The HTTP/2 JSON client the voice path uses to call Kanaha Calcs is compiled
+# from the Axis2/C checkout, not copied -- the same rule as calcs' service.
+AXIS2_SRC=$HOME/repos/axis-axis2-c-core
 
 INCLUDES="-I$SRC -I$DEPS/include -I$DEPS/include/apr-1 \
  -I$DEPS/include/axis2-2.0.0 -I$DEPS/include/axis2-2.0.0/platforms/unix \
- -I$DEPS/include/json-c -I$DEPS/include/nghttp2 -I$DEPS/include/openssl"
+ -I$DEPS/include/json-c -I$DEPS/include/nghttp2 -I$DEPS/include/openssl -I$AXIS2_SRC/include"
 CFLAGS="-O2 -fPIC -D__ANDROID__ -DANDROID -DUSE_CROSS_COMPILED_LIBS=1 \
  -DAXIS2_JSON_ENABLED=1 -DWITH_NGHTTP2=1 -DWITH_OPENSSL=1 \
+ -DKANAHA_VOICE=1 \
  -Wall -Wno-unused-parameter -Wno-unused-variable \
  -fsigned-char"
 
@@ -45,6 +49,11 @@ SERVICE_SRCS=(
   "$SRC/recording/gps_reader.c"
   "$SRC/sftp/audio_sftp.c"
   "$SRC/ltc/ltc_decoder.c"
+  "$SRC/voice/kanaha_resolver.c"
+  "$SRC/voice/kanaha_answer.c"
+  "$SRC/voice/kanaha_calc.c"
+  "$SRC/voice/kanaha_voice.c"
+  "$AXIS2_SRC/src/core/transport/h2/sender/axis2_h2_json_client.c"
 )
 OBJS=()
 for s in "${SERVICE_SRCS[@]}"; do

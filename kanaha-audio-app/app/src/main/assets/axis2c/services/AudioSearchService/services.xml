@@ -121,6 +121,24 @@
             <parameter name="contentType">application/json</parameter>
         </operation>
 
+        <operation name="voiceRequest">
+            <parameter name="mcpDescription">Run one spoken or typed calculation request on this phone: resolve it with a fixed grammar, call Kanaha Calcs on the other phone over HTTP/2 with mTLS, and word the answer. Returns the read-back, the answer, a one-sentence SAY line and a replayable SPEC trace; with speak true, says the read-back and the answer on this speaker.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"text":{"type":"string","description":"The transcript, as whisper wrote it"},"speak":{"type":"boolean","description":"Say the read-back and the answer on this phone. Default false"}},"required":["text"]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/voiceRequest</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="voiceReset">
+            <parameter name="mcpDescription">Forget the pending question and the cached file catalog of the voice path.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{}}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/voiceReset</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
         <operation name="listRecordings">
             <parameter name="mcpDescription">List WAV recordings with file sizes and estimated durations.</parameter>
             <parameter name="mcpInputSchema">{"type":"object","properties":{},"required":[]}</parameter>
