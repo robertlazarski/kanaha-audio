@@ -325,9 +325,14 @@ int audio_tone_play_file(const char *wav_path) {
         return -1;
     }
 
-    /* Read all PCM data */
-    fseek(f, 0, SEEK_END);
-    long file_size = ftell(f);
+    /* Read all PCM data. The whole file is loaded, so its size is bounded:
+     * a caller naming a large file must not be able to exhaust memory. */
+    long file_size = (long)wav_stat.st_size;
+    if (file_size < 44 || file_size > AUDIO_PLAY_MAX_BYTES) {
+        LOGE("WAV size %ld outside [44, %d]", file_size, AUDIO_PLAY_MAX_BYTES);
+        fclose(f);
+        return -1;
+    }
     fseek(f, 44, SEEK_SET);
 
     long data_bytes = file_size - 44;

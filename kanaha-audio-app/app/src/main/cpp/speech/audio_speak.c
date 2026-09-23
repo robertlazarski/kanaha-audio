@@ -86,8 +86,14 @@ int audio_speak_text(const char *text, const char *audio_dir,
     }
 
     /* One speaker, one voice, one utterance at a time. Two overlapping calls
-     * would talk over each other on the same speaker even if flite allowed it. */
-    pthread_mutex_lock(&s_lock);
+     * would talk over each other on the same speaker even if flite allowed it.
+     * A second call is refused rather than queued: queued, it would hold an
+     * HTTP worker for the whole of the first utterance and then say something
+     * stale. */
+    if (pthread_mutex_trylock(&s_lock) != 0) {
+        LOGE("Already speaking; refusing an overlapping call");
+        return AUDIO_SPEAK_BUSY;
+    }
 
     if (ensure_voice() != 0) {
         pthread_mutex_unlock(&s_lock);
@@ -107,8 +113,9 @@ int audio_speak_text(const char *text, const char *audio_dir,
 
     /* A fixed name in the app's own audio directory: the file is an artefact of
      * this call, not something a caller names, so there is no path to validate
-     * and nothing a caller can point at. */
-    snprintf(wav_path, sizeof(wav_path), "%s/.speak.wav", audio_dir);
+     * and nothing a caller can point at. The pid keeps the httpd and the MCP
+     * binary, which share the directory but not s_lock, off each other's file. */
+    snprintf(wav_path, sizeof(wav_path), "%s/.speak-%d.wav", audio_dir, (int)getpid());
     if (cst_wave_save_riff(wave, wav_path) != 0) {
         LOGE("Could not write %s", wav_path);
         delete_wave(wave);

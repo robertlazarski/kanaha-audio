@@ -507,10 +507,7 @@ static json_object *mcp_handle_tools_call(
     }
     if (!found) {
         *out_code = MCP_ERR_METHOD_NOT_FOUND;
-        *out_msg  = "Unknown tool. Available: searchKeywords, transcribe, "
-                    "getStatus, listModels, loadModel, detectAudioEvents, "
-                    "listAudioFiles, startRecording, stopRecording, "
-                    "playTone, listRecordings";
+        *out_msg  = "Unknown tool; tools/list names the available ones";
         return NULL;
     }
 

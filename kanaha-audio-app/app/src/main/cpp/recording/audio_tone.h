@@ -45,13 +45,18 @@ extern "C" {
  */
 int audio_tone_play(int frequency, int duration_ms, int64_t start_at_ms);
 
+/* Largest WAV audio_tone_play_file will load: it reads the whole file into
+ * memory. 64 MB is over half an hour of 16 kHz mono, several minutes of
+ * 48 kHz stereo. */
+#define AUDIO_PLAY_MAX_BYTES (64 * 1024 * 1024)
+
 /**
  * Play a WAV audio file through the device speaker.
  *
  * Reads PCM samples from a WAV file and plays them via AAudio output.
  * Supports 16-bit mono or stereo WAV at any sample rate.
  *
- * @param wav_path  Path to WAV file
+ * @param wav_path  Path to WAV file, at most AUDIO_PLAY_MAX_BYTES
  * @return 0 on success, -1 on error
  */
 int audio_tone_play_file(const char *wav_path);

@@ -15,6 +15,9 @@
  * either a mistake or a way to occupy the speaker for minutes. */
 #define AUDIO_SPEAK_MAX_TEXT 500
 
+/* audio_speak_text: another call is speaking; nothing was said. */
+#define AUDIO_SPEAK_BUSY (-2)
+
 typedef struct {
     int duration_ms;    /* length of the synthesised audio */
     int sample_rate;    /* the voice's rate, 16000 for cmu_us_kal16 */
@@ -23,6 +26,7 @@ typedef struct {
 /**
  * Synthesise `text` and play it on this device. Blocks until the utterance
  * finishes, so a caller that must not block should run it on its own thread.
+ * Returns AUDIO_SPEAK_BUSY, without waiting, if another call is speaking.
  *
  * @param text       what to say, at most AUDIO_SPEAK_MAX_TEXT characters
  * @param audio_dir  the app's audio directory; a temporary WAV is written and

@@ -402,10 +402,22 @@ int audio_search_service_invoke_json_impl(
      * not make one of them an error - dropping "operation" here breaks every
      * HTTPS call even though the engine routed it correctly. */
     char action[64];
-    if (!extract_json_string(json_request, "action", action, sizeof(action))
-        && !extract_json_string(json_request, "operation", action, sizeof(action))) {
+    char operation[64];
+    int has_action = extract_json_string(json_request, "action", action, sizeof(action)) != NULL;
+    int has_operation = extract_json_string(json_request, "operation", operation, sizeof(operation)) != NULL;
+    if (!has_action && !has_operation) {
         create_error_response(json_response, response_size, "Missing 'action' parameter");
         return -1;
+    }
+    /* Over HTTP "operation" is the URL's; a body "action" naming something
+     * else would otherwise run an operation the URL did not ask for. */
+    if (has_action && has_operation && strcmp(action, operation) != 0) {
+        create_error_response(json_response, response_size,
+                              "'action' and 'operation' name different operations");
+        return -1;
+    }
+    if (!has_action) {
+        memcpy(action, operation, sizeof(action));
     }
 
     /* Sanitize action for logging to prevent log injection via control characters */
@@ -938,8 +950,19 @@ int audio_search_service_invoke_json_impl(
             return -1;
         }
 
+        /* Synchronous on purpose, unlike playTone: the response is the signal
+         * that the speaker has finished. The confirm flow speaks a read-back,
+         * then cues and records the "yes" -- returning early would put the
+         * phone's own voice in that recording. Overlapping calls are refused
+         * (AUDIO_SPEAK_BUSY), so at most one worker waits here. */
         audio_speak_result_t spoken;
-        if (audio_speak_text(text, audio_dir, &spoken) != 0) {
+        int speak_rc = audio_speak_text(text, audio_dir, &spoken);
+        if (speak_rc == AUDIO_SPEAK_BUSY) {
+            create_error_response(json_response, response_size,
+                                  "Already speaking; one utterance at a time");
+            return -1;
+        }
+        if (speak_rc != 0) {
             create_error_response(json_response, response_size,
                                   "Speech synthesis or playback failed");
             return -1;
