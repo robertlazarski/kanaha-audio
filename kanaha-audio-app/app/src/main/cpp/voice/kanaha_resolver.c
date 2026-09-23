@@ -716,6 +716,15 @@ static void say_regime_and_op(const kr_spec_t *sp, char *buf)
         cat(buf, ". Portfolio variance.");
 }
 
+void kr_describe(const kr_spec_t *sp, char *buf, int len)
+{
+    char tmp[KR_SAY_LEN];
+    tmp[0] = '\0';
+    say_subject(sp, tmp);
+    say_data(sp, tmp);
+    snprintf(buf, (size_t)len, "%s", tmp);
+}
+
 static void ask(kr_session_t *s, kr_result_t *out, const kr_spec_t *sp, kr_slot_t slot,
                 int have_subject)
 {

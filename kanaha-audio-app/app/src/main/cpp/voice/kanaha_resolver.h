@@ -127,6 +127,11 @@ void kr_session_init(kr_session_t *s);
 void kr_resolve(const kr_context_t *ctx, kr_session_t *s,
                 const char *transcript, kr_result_t *out);
 
+/* What a spec is, as the room hears it, without the operation: "The book —
+ * MSFT, AAPL, AMZN, JPM, JNJ, equal weights, ten years of the FIS file".
+ * Every answer opens with this, so a book is expanded aloud each time. */
+void kr_describe(const kr_spec_t *sp, char *buf, int len);
+
 /* The spoken name of a file: "the FIS file" for fis_daily_closes.csv. */
 void kr_file_spoken(const kr_file_t *f, char *buf, int len);
 
