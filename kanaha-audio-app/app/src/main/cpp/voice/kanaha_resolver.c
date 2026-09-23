@@ -451,9 +451,13 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
         break;
     }
 
-    /* Every vol at N percent. "vowel" is how whisper hears "vol". */
+    /* Every vol at N percent. "vowel" and "valve" are how whisper hears
+     * "vol"; "volume" is how the presenter says it. It is only a volatility
+     * here when a number follows -- nothing in this grammar takes a trading
+     * volume -- and the read-back says "vol", so the room hears the term. */
     for (i = 0; i < ts->n; i++) {
-        if (!is_w(ts, i, "vol|vols|volatility|volatilities|vowel|vowels"))
+        if (!is_w(ts, i, "vol|vols|volatility|volatilities|vowel|vowels|valve|valves|"
+                         "volume|volumes"))
             continue;
         nr = number_after(ts, i, &pct);
         if (!nr.ok)

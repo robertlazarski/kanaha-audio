@@ -273,6 +273,12 @@ int main(void)
         check(fabs(R.spec.vol - 0.22) < 1e-12 && fabs(R.spec.rho - 0.5) < 1e-12,
               "  vol 0.22, rho 0.5", "");
     }
+    /* the presenter's own word for it, 2026-09-22 */
+    RUN1("every volume at twenty-two percent", "every volume at twenty-two percent, correlation "
+         "point five, on the book", KR_RUN, "Every vol at 22 percent, every correlation 0.50");
+    /* spoken through the Moto, 2026-09-22 */
+    RUN1("\"valve\" for vol", "Every valve at 22% correlation point five on the book", KR_RUN,
+         "Every vol at 22 percent");
     RUN1("every vol twenty-two percent, correlation point five, the book",
          "every vol at twenty-two percent, correlation point five, on the book", KR_RUN, NULL);
     expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HYPOTHETICAL, FIVE, NULL, 0);
