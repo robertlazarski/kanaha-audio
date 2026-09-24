@@ -161,7 +161,14 @@ static void *tone_thread_func(void *arg) {
     AAudioStreamBuilder_setSampleRate(builder, TONE_SAMPLE_RATE);
     AAudioStreamBuilder_setChannelCount(builder, 1);
     AAudioStreamBuilder_setFormat(builder, AAUDIO_FORMAT_PCM_I16);
-    AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+    /* Through the mixer, not low latency: a low-latency output opens an MMAP
+     * stream straight to the hardware, which Android's playback capture never
+     * sees -- so scrcpy forwarding this phone's audio to the room's laptop
+     * (and on to Teams) heard silence while the speaker played. A cue does
+     * not need the few milliseconds MMAP saves. */
+    AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_NONE);
+    AAudioStreamBuilder_setUsage(builder, AAUDIO_USAGE_MEDIA);
+    AAudioStreamBuilder_setContentType(builder, AAUDIO_CONTENT_TYPE_SONIFICATION);
     AAudioStreamBuilder_setDataCallback(builder, tone_data_callback, &state);
 
     AAudioStream *stream = NULL;
@@ -388,7 +395,11 @@ int audio_tone_play_file(const char *wav_path) {
     AAudioStreamBuilder_setSampleRate(builder, sample_rate);
     AAudioStreamBuilder_setChannelCount(builder, 1);
     AAudioStreamBuilder_setFormat(builder, AAUDIO_FORMAT_PCM_I16);
-    AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+    /* Mixed, capturable media -- see the tone stream above. Speech is what
+     * the room and a remote audience most need to hear. */
+    AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_NONE);
+    AAudioStreamBuilder_setUsage(builder, AAUDIO_USAGE_MEDIA);
+    AAudioStreamBuilder_setContentType(builder, AAUDIO_CONTENT_TYPE_SPEECH);
     AAudioStreamBuilder_setDataCallback(builder, wav_data_callback, &state);
 
     AAudioStream *stream = NULL;
