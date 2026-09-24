@@ -113,6 +113,16 @@ static void clip_path(const char *clip, char *buf, size_t len)
     snprintf(buf, len, "%s/%s.wav", resolved[0] ? resolved : (dir ? dir : "."), clip);
 }
 
+/* A clip that has done its job: nothing heard is kept unless asked. */
+static void discard(const char *clip)
+{
+    char path[640];
+    if (s_cfg.keep_clips)
+        return;
+    clip_path(clip, path, sizeof(path));
+    unlink(path);
+}
+
 static int rec_start(const char *clip)
 {
     if (audio_recording_start(clip, SAMPLE_RATE, 0) != 0) {
@@ -395,8 +405,10 @@ static void *loop_main(void *arg)
             break;
         s_clips++;
         hit = trigger_in(just);
-        if (hit < 0)
+        if (hit < 0) {
+            discard(just);
             continue;
+        }
         s_triggers++;
         if (now_s() - last_request < s_cfg.cooldown_secs) {
             LOGI("trigger within cooldown - ignored");
@@ -404,12 +416,17 @@ static void *loop_main(void *arg)
         }
         handle_request(just, CLIPS[ci]);
         last_request = now_s();
+        discard(just);
+        discard(CLIPS[ci]);
+        discard("vl_spec");
+        discard("vl_answer");
         /* back to listening */
         ci = (ci + 1) % N_CLIPS;
         if (!s_stop && rec_start(CLIPS[ci]) != 0)
             break;
     }
     rec_stop();
+    discard(CLIPS[ci]);
     pthread_mutex_lock(&s_lock);
     s_state = ST_STOPPED;
     pthread_mutex_unlock(&s_lock);
@@ -441,6 +458,7 @@ int kanaha_voice_loop_start(const kvl_config_t *cfg, char *err, int err_len)
     s_cfg.cooldown_secs = (cfg && cfg->cooldown_secs > 0) ? cfg->cooldown_secs : 4.0;
     s_cfg.min_confidence = (cfg && cfg->min_confidence > 0) ? cfg->min_confidence : 0.5f;
     snprintf(s_model, sizeof(s_model), "%s", (cfg && cfg->model && cfg->model[0]) ? cfg->model : "tiny.en");
+    s_cfg.keep_clips = cfg ? cfg->keep_clips : 0;
     s_clips = s_triggers = s_requests = 0;
     s_last_heard[0] = s_last_outcome[0] = s_last_error[0] = '\0';
     s_stop = 0;

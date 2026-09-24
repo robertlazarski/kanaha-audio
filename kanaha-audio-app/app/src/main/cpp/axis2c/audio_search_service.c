@@ -842,6 +842,8 @@ int audio_search_service_invoke_json_impl(
         cfg.clip_secs = extract_json_float(json_request, "clip_secs", 0.0f);
         cfg.spec_secs = extract_json_float(json_request, "spec_secs", 0.0f);
         cfg.cooldown_secs = extract_json_float(json_request, "cooldown_secs", 0.0f);
+        cfg.keep_clips = strstr(json_request, "\"keep_clips\":true") != NULL ||
+                         strstr(json_request, "\"keep_clips\": true") != NULL;
         cfg.min_confidence = extract_json_float(json_request, "min_confidence", 0.0f);
         extract_json_string(json_request, "model", model, sizeof(model));
         cfg.model = model[0] ? model : NULL;

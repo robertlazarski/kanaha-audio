@@ -16,6 +16,10 @@
  * rotation restarts afterwards, so the phone never records its own read-back.
  * While the loop runs it owns the microphone: startRecording over HTTP or MCP
  * is refused. The app must be in the foreground for the microphone to hear.
+ *
+ * Nothing heard is kept: a trigger clip is deleted once it has been searched,
+ * the clips a request used once it has been answered, and the clip in progress
+ * when the loop stops. keep_clips leaves them on disk, for debugging.
  */
 
 #ifndef KANAHA_VOICE_LOOP_H
@@ -29,6 +33,7 @@ typedef struct {
     double cooldown_secs;   /* after a request, ignore triggers; 0 = 4 */
     float min_confidence;   /* trigger floor; 0 = 0.5 */
     const char *model;      /* whisper model; NULL = "tiny.en" */
+    int keep_clips;         /* leave clips on disk after use (debugging) */
 } kvl_config_t;
 
 /* Start the loop. 0, or -1 with err set (already running, no model...). */
