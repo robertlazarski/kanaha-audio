@@ -80,6 +80,13 @@ static void kanaha_audio_init_locked(void)
     audio_search_service_init(models_dir);
 }
 
+/* The same once-only initialisation the first request runs, for code that
+ * must start before any request arrives (the voice loop's autostart). */
+void kanaha_audio_ensure_initialised(void)
+{
+    pthread_once(&kanaha_audio_init_once, kanaha_audio_init_locked);
+}
+
 /* External: application service implementation (from audio_search_service.c) */
 extern int audio_search_service_invoke_json_impl(
     const char *json_request,

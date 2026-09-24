@@ -7,6 +7,7 @@ set -euo pipefail
 #
 # Usage: kanaha-voice-setup.sh --serial <audio adb serial> --books <kanaha-books.json>
 #                              [--calcs <ip>] [--port 8444] [--name calcs.local]
+#                              [--no-autostart]
 #
 # Without --calcs the calcs phone is found by mDNS: the _https._tcp service
 # whose TXT record carries api=kanaha-calcs. Never by its .local hostname,
@@ -16,8 +17,12 @@ set -euo pipefail
 #
 # --name is the name the calcs certificate carries (its SAN), checked by the
 # audio phone on every connection. The calcs provisioning names it calcs.local.
+#
+# The voice loop starts listening when the audio server starts, unless
+# --no-autostart. Start the server from the app, so the app is in the
+# foreground: Android gives a background app a silent microphone.
 
-SERIAL="" BOOKS="" CALCS="" PORT=8444 NAME="calcs.local"
+SERIAL="" BOOKS="" CALCS="" PORT=8444 NAME="calcs.local" AUTOSTART=true
 while [[ $# -gt 0 ]]; do
     case $1 in
         --serial) SERIAL="$2"; shift 2 ;;
@@ -25,7 +30,8 @@ while [[ $# -gt 0 ]]; do
         --calcs) CALCS="$2"; shift 2 ;;
         --port) PORT="$2"; shift 2 ;;
         --name) NAME="$2"; shift 2 ;;
-        -h|--help) sed -n '5,17p' "$0"; exit 0 ;;
+        --no-autostart) AUTOSTART=false; shift ;;
+        -h|--help) sed -n '5,22p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -44,8 +50,8 @@ if [[ -z "$CALCS" ]]; then
 fi
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-printf '{"calcs": {"host": "%s", "port": %d, "verify_name": "%s"}}\n' "$CALCS" "$PORT" "$NAME" \
-    > "$TMP/voice.json"
+printf '{"calcs": {"host": "%s", "port": %d, "verify_name": "%s"},\n "loop": {"autostart": %s, "clip_secs": 6, "spec_secs": 8}}\n' \
+    "$CALCS" "$PORT" "$NAME" "$AUTOSTART" > "$TMP/voice.json"
 
 A=(adb -s "$SERIAL")
 "${A[@]}" push "$TMP/voice.json" /data/local/tmp/kanaha-voice.json >/dev/null
@@ -57,4 +63,5 @@ A=(adb -s "$SERIAL")
   && run-as org.kanaha.audio chmod 600 files/voice/voice.json files/voice/kanaha-books.json; \
   rm -f /data/local/tmp/kanaha-voice.json /data/local/tmp/kanaha-books.json"
 echo "voice path on $SERIAL now calls $CALCS:$PORT (certificate name $NAME)"
-echo "if the service is already running, send voiceReset so it rereads them"
+echo "voice loop autostart: $AUTOSTART (takes effect when the audio server next starts)"
+echo "if the service is already running, send voiceReset so the voice path rereads them"

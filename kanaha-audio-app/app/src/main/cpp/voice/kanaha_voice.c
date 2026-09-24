@@ -185,6 +185,20 @@ int kanaha_voice_request(const char *transcript, int speak, char *out, size_t si
     return 0;
 }
 
+int kanaha_voice_prepare(char *err, int err_len)
+{
+    int rc;
+    pthread_mutex_lock(&s_lock);
+    rc = ensure_ready(err, err_len);
+    pthread_mutex_unlock(&s_lock);
+    return rc;
+}
+
+const char *kanaha_voice_files_dir(void)
+{
+    return s_files;
+}
+
 void kanaha_voice_reset(void)
 {
     pthread_mutex_lock(&s_lock);

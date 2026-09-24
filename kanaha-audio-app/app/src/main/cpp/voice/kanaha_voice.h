@@ -36,6 +36,14 @@ void kanaha_voice_init(const char *files_dir);
  * Returns 0, or -1 with {"success":false,"error":"..."} in json_out. */
 int kanaha_voice_request(const char *transcript, int speak, char *json_out, size_t out_size);
 
+/* Load the books, connect to the calcs phone and fetch its catalog now, so a
+ * bad configuration shows at startup rather than on the first spoken request.
+ * 0, or -1 with err set. */
+int kanaha_voice_prepare(char *err, int err_len);
+
+/* The files directory given to kanaha_voice_init ("" before it). */
+const char *kanaha_voice_files_dir(void);
+
 /* Forget the pending question, the cached catalog and the connection, so the
  * next request rereads voice.json and the books (a new speaker, a new calcs
  * address, or the calcs phone's files changed). */

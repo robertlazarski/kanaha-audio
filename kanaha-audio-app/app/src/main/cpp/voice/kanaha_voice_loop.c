@@ -17,6 +17,7 @@
 
 #include <ctype.h>
 #include <limits.h>
+#include <signal.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -432,6 +433,90 @@ static void *loop_main(void *arg)
     pthread_mutex_unlock(&s_lock);
     LOGI("stopped");
     return NULL;
+}
+
+/* ------------------------------------------------------------------------ */
+/* autostart                                                                 */
+/* ------------------------------------------------------------------------ */
+
+/* The audio service initialises on its first request (the adapter's lazy
+ * init), so nothing would start the loop until someone sent one. Instead a
+ * thread started when this binary loads waits for Apache to come up, runs
+ * that same once-only init, and starts the loop if voice/voice.json says
+ *
+ *   "loop": {"autostart": true, "clip_secs": 6, "spec_secs": 8}
+ *
+ * It relies on httpd running as one process (-X, which is how AudioService
+ * launches it): a thread started before a fork would not reach the child.
+ * The app must be in the foreground for the microphone to hear, which it is
+ * when the server is started from the app. */
+extern void kanaha_audio_ensure_initialised(void);
+
+static void *autostart_main(void *arg)
+{
+    sigset_t all;
+    char path[640], err[256];
+    json_object *cfg, *loop, *v;
+    kvl_config_t c;
+    const char *files;
+    (void)arg;
+
+    sigfillset(&all);                   /* Apache's signals are for Apache */
+    pthread_sigmask(SIG_BLOCK, &all, NULL);
+    sleep(4);
+
+    kanaha_audio_ensure_initialised();
+    files = kanaha_voice_files_dir();
+    if (!files || !files[0])
+        return NULL;
+    snprintf(path, sizeof(path), "%s/voice/voice.json", files);
+    cfg = json_object_from_file(path);
+    if (!cfg)
+        return NULL;
+    if (!json_object_object_get_ex(cfg, "loop", &loop) ||
+        !json_object_object_get_ex(loop, "autostart", &v) || !json_object_get_boolean(v)) {
+        json_object_put(cfg);
+        return NULL;
+    }
+    memset(&c, 0, sizeof(c));
+    if (json_object_object_get_ex(loop, "clip_secs", &v)) c.clip_secs = json_object_get_double(v);
+    if (json_object_object_get_ex(loop, "spec_secs", &v)) c.spec_secs = json_object_get_double(v);
+    json_object_put(cfg);
+
+    /* Connect and fetch the catalog first, so a wrong address or a missing
+     * book is in the status now, not discovered by the first thing somebody
+     * says. It does not stop the loop: a calcs phone that is off at startup
+     * may be on by the first request, and the request says so if it is not. */
+    {
+        char prep[256];
+        int prepared = kanaha_voice_prepare(prep, sizeof(prep)) == 0;
+        if (kanaha_voice_loop_start(&c, err, sizeof(err)) != 0) {
+            pthread_mutex_lock(&s_lock);
+            snprintf(s_last_error, sizeof(s_last_error), "autostart: %s", err);
+            pthread_mutex_unlock(&s_lock);
+            LOGE("autostart: %s", err);
+            return NULL;
+        }
+        if (!prepared) {
+            pthread_mutex_lock(&s_lock);
+            snprintf(s_last_error, sizeof(s_last_error), "autostart: listening, but %s", prep);
+            pthread_mutex_unlock(&s_lock);
+            LOGE("autostart: listening, but %s", prep);
+        }
+    }
+    LOGI("autostart: listening");
+    return NULL;
+}
+
+__attribute__((constructor))
+static void autostart_at_load(void)
+{
+    pthread_t t;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&t, &attr, autostart_main, NULL);
+    pthread_attr_destroy(&attr);
 }
 
 int kanaha_voice_loop_start(const kvl_config_t *cfg, char *err, int err_len)
