@@ -139,6 +139,33 @@
             <parameter name="contentType">application/json</parameter>
         </operation>
 
+        <operation name="startVoiceLoop">
+            <parameter name="mcpDescription">Start listening on this phone: trigger words, a cue tone, one dictation window, then the request resolved, sent to Kanaha Calcs on the other phone and answered aloud. Needs the app in the foreground; owns the microphone until stopVoiceLoop.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"clip_secs":{"type":"number","description":"Trigger clip length, default 6"},"spec_secs":{"type":"number","description":"Dictation and answer windows, default 8"},"model":{"type":"string","description":"Whisper model, default tiny.en"}}}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/startVoiceLoop</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="stopVoiceLoop">
+            <parameter name="mcpDescription">Stop listening and release the microphone. A request in progress is finished first.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{}}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/stopVoiceLoop</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="voiceLoopStatus">
+            <parameter name="mcpDescription">Whether the voice loop is listening, with counts and the last thing it heard.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{}}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/voiceLoopStatus</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
         <operation name="listRecordings">
             <parameter name="mcpDescription">List WAV recordings with file sizes and estimated durations.</parameter>
             <parameter name="mcpInputSchema">{"type":"object","properties":{},"required":[]}</parameter>

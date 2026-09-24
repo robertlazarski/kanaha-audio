@@ -53,6 +53,7 @@ SERVICE_SRCS=(
   "$SRC/voice/kanaha_answer.c"
   "$SRC/voice/kanaha_calc.c"
   "$SRC/voice/kanaha_voice.c"
+  "$SRC/voice/kanaha_voice_loop.c"
   "$AXIS2_SRC/src/core/transport/h2/sender/axis2_h2_json_client.c"
 )
 OBJS=()

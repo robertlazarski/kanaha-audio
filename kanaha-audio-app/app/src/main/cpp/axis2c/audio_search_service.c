@@ -53,6 +53,7 @@
 #include "../speech/audio_speak.h"
 #ifdef KANAHA_VOICE
 #include "../voice/kanaha_voice.h"
+#include "../voice/kanaha_voice_loop.h"
 #endif
 #include "../recording/audio_sidecar.h"
 #include "../recording/gps_reader.h"
@@ -825,6 +826,39 @@ int audio_search_service_invoke_json_impl(
      * Side effect: writes kanaha_audio_recording_start.json sidecar
      * with recording_start_ms and GPS coordinates (if available).
      * ================================================================ */
+#ifdef KANAHA_VOICE
+    /* While the voice loop runs it owns the microphone; a recording started or
+     * stopped from outside would silently end its listening. */
+    else if ((strcmp(action, "startRecording") == 0 || strcmp(action, "stopRecording") == 0) &&
+             kanaha_voice_loop_active()) {
+        create_error_response(json_response, response_size,
+                              "The voice loop is using the microphone; stopVoiceLoop first");
+        return -1;
+    }
+    else if (strcmp(action, "startVoiceLoop") == 0) {
+        kvl_config_t cfg;
+        char model[32] = "", err[256];
+        memset(&cfg, 0, sizeof(cfg));
+        cfg.clip_secs = extract_json_float(json_request, "clip_secs", 0.0f);
+        cfg.spec_secs = extract_json_float(json_request, "spec_secs", 0.0f);
+        cfg.cooldown_secs = extract_json_float(json_request, "cooldown_secs", 0.0f);
+        cfg.min_confidence = extract_json_float(json_request, "min_confidence", 0.0f);
+        extract_json_string(json_request, "model", model, sizeof(model));
+        cfg.model = model[0] ? model : NULL;
+        if (kanaha_voice_loop_start(&cfg, err, sizeof(err)) != 0) {
+            create_error_response(json_response, response_size, err);
+            return -1;
+        }
+        safe_snprintf(json_response, response_size, 0, "{\"success\":true,\"state\":\"starting\"}");
+    }
+    else if (strcmp(action, "stopVoiceLoop") == 0) {
+        kanaha_voice_loop_stop();
+        safe_snprintf(json_response, response_size, 0, "{\"success\":true,\"state\":\"stopping\"}");
+    }
+    else if (strcmp(action, "voiceLoopStatus") == 0) {
+        kanaha_voice_loop_status(json_response, response_size);
+    }
+#endif
     else if (strcmp(action, "startRecording") == 0) {
         char clip_name[AUDIO_RECORDING_MAX_CLIP_NAME] = "";
         extract_json_string(json_request, "clip_name", clip_name, sizeof(clip_name));
