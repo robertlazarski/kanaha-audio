@@ -49,6 +49,13 @@ static char s_model[32];
 static long s_clips, s_triggers, s_requests;
 static char s_last_heard[512], s_last_outcome[16], s_last_error[256];
 
+/* The last requests, kept here because logcat on a busy phone rotates them
+ * out within minutes: what was heard, what came of it, and what was said. */
+#define HISTORY 20
+typedef struct { char when[16]; char heard[256]; char outcome[16]; char said[256]; } entry_t;
+static entry_t s_hist[HISTORY];
+static int s_hist_n, s_hist_next;
+
 static const char *TRIGGERS[] = { "calculate", "run it", "stress it", "simulate it" };
 #define N_TRIGGERS 4
 
@@ -266,12 +273,28 @@ static void window(const char *clip, char *text, size_t len)
     transcribe(clip, text, len);
 }
 
-static void remember(const char *heard, const char *outcome)
+static void remember_said(const char *heard, const char *outcome, const char *said)
 {
+    entry_t *e;
+    time_t t = time(NULL);
+    struct tm tmv;
     pthread_mutex_lock(&s_lock);
     snprintf(s_last_heard, sizeof(s_last_heard), "%s", heard);
     snprintf(s_last_outcome, sizeof(s_last_outcome), "%s", outcome);
+    e = &s_hist[s_hist_next];
+    localtime_r(&t, &tmv);
+    strftime(e->when, sizeof(e->when), "%H:%M:%S", &tmv);
+    snprintf(e->heard, sizeof(e->heard), "%s", heard);
+    snprintf(e->outcome, sizeof(e->outcome), "%s", outcome);
+    snprintf(e->said, sizeof(e->said), "%s", said ? said : "");
+    s_hist_next = (s_hist_next + 1) % HISTORY;
+    if (s_hist_n < HISTORY) s_hist_n++;
     pthread_mutex_unlock(&s_lock);
+}
+
+static void remember(const char *heard, const char *outcome)
+{
+    remember_said(heard, outcome, NULL);
 }
 
 /* The request after a trigger in `trigger_clip`; `bridge_clip` was recording
@@ -336,7 +359,15 @@ static void handle_request(const char *trigger_clip, const char *bridge_clip)
             outcome = "ERROR";
         }
         LOGI("[request] '%s' -> %s", text, outcome);
-        remember(text, outcome);
+        {
+            /* What the room heard: the answer's SAY line, or the question,
+             * refusal or read-back when there was no answer. */
+            json_object *said = NULL;
+            if (!(r && json_object_object_get_ex(r, "say", &said)) &&
+                !(r && json_object_object_get_ex(r, "readback", &said)))
+                said = NULL;
+            remember_said(text, outcome, said ? json_object_get_string(said) : NULL);
+        }
 
         /* The person heard the window open and spoke: silence would read as a
          * fault, so nothing calculable gets the nothing-heard tone. */
@@ -596,6 +627,20 @@ void kanaha_voice_loop_status(char *out, size_t size)
     json_object_object_add(o, "last_heard", json_object_new_string(s_last_heard));
     json_object_object_add(o, "last_outcome", json_object_new_string(s_last_outcome));
     json_object_object_add(o, "last_error", json_object_new_string(s_last_error));
+    {
+        json_object *h = json_object_new_array();
+        int i;
+        for (i = 0; i < s_hist_n; i++) {
+            entry_t *e = &s_hist[(s_hist_next - s_hist_n + i + HISTORY) % HISTORY];
+            json_object *x = json_object_new_object();
+            json_object_object_add(x, "when", json_object_new_string(e->when));
+            json_object_object_add(x, "heard", json_object_new_string(e->heard));
+            json_object_object_add(x, "outcome", json_object_new_string(e->outcome));
+            json_object_object_add(x, "said", json_object_new_string(e->said));
+            json_object_array_add(h, x);
+        }
+        json_object_object_add(o, "history", h);
+    }
     pthread_mutex_unlock(&s_lock);
     snprintf(out, size, "%s", json_object_to_json_string_ext(o, JSON_C_TO_STRING_PLAIN));
     json_object_put(o);
