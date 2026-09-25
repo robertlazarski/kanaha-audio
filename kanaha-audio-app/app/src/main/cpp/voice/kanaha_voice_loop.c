@@ -17,6 +17,7 @@
 
 #include <ctype.h>
 #include <limits.h>
+#include <stdint.h>
 #include <signal.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -103,6 +104,14 @@ static const struct { const char *phrase; int action; } KEYWORDS[] = {
     { "numbers please", KW_SWITCH },
 };
 #define N_KEYWORDS ((int)(sizeof(KEYWORDS) / sizeof(KEYWORDS[0])))
+
+/* Decoder priming for the trigger search: the phrases it is listening for.
+ * whisper biases its decode toward text it has been shown, which is what a
+ * fixed command vocabulary wants. Checked on silent room clips first
+ * (2026-09-24): primed or not, none produced a phrase -- the failure to fear
+ * with a prompt is whisper echoing it back into silence. */
+static const char *TRIGGER_PROMPT =
+    "Calculate. Start the cameras please. Stop the cameras please. Show the numbers please.";
 
 /* Said inside a window, any of these throws the utterance away. Decided here,
  * not by the resolver: a cancel must cost nothing and must be impossible to
@@ -290,7 +299,7 @@ static int trigger_in(const char *clip)
     const char *phrases[N_KEYWORDS];
     for (i = 0; i < N_KEYWORDS; i++)
         phrases[i] = KEYWORDS[i].phrase;
-    if (whisper_bridge_search_keywords(path, phrases, N_KEYWORDS, NULL, &r) != 0) {
+    if (whisper_bridge_search_keywords(path, phrases, N_KEYWORDS, TRIGGER_PROMPT, &r) != 0) {
         /* A failed search must not look like a quiet room. */
         pthread_mutex_lock(&s_lock);
         snprintf(s_last_error, sizeof(s_last_error), "keyword search failed on %s", path);
@@ -311,6 +320,61 @@ static int trigger_in(const char *clip)
         }
     }
     return -1;
+}
+
+/* Join two finished clips into `out`, so the search sees the seam whole: a
+ * phrase said across the boundary between two clips was in neither, and the
+ * clips are recorded back to back because the recorder cannot overlap. Both
+ * are this recorder's own 44-byte-header, 16 kHz mono 16-bit files. */
+static int join_clips(const char *a, const char *b, const char *out)
+{
+    char pa[640], pb[640], po[640];
+    const char *in[2] = { pa, pb };
+    FILE *fo;
+    unsigned char hdr[44];
+    uint32_t data = 0, v32;
+    uint16_t v16;
+    int i;
+
+    clip_path(a, pa, sizeof(pa));
+    clip_path(b, pb, sizeof(pb));
+    clip_path(out, po, sizeof(po));
+    if (!(fo = fopen(po, "wb")))
+        return -1;
+    memset(hdr, 0, sizeof(hdr));
+    fwrite(hdr, 1, sizeof(hdr), fo);            /* filled in once the size is known */
+    for (i = 0; i < 2; i++) {
+        char buf[16384];
+        size_t n;
+        FILE *fi = fopen(in[i], "rb");
+        if (!fi || fseek(fi, 44, SEEK_SET) != 0) {
+            if (fi) fclose(fi);
+            fclose(fo);
+            unlink(po);
+            return -1;
+        }
+        while ((n = fread(buf, 1, sizeof(buf), fi)) > 0) {
+            fwrite(buf, 1, n, fo);
+            data += (uint32_t)n;
+        }
+        fclose(fi);
+    }
+    memcpy(hdr, "RIFF", 4);
+    v32 = 36 + data;           memcpy(hdr + 4, &v32, 4);
+    memcpy(hdr + 8, "WAVEfmt ", 8);
+    v32 = 16;                  memcpy(hdr + 16, &v32, 4);
+    v16 = 1;                   memcpy(hdr + 20, &v16, 2);      /* PCM */
+    v16 = 1;                   memcpy(hdr + 22, &v16, 2);      /* mono */
+    v32 = SAMPLE_RATE;         memcpy(hdr + 24, &v32, 4);
+    v32 = SAMPLE_RATE * 2;     memcpy(hdr + 28, &v32, 4);      /* byte rate */
+    v16 = 2;                   memcpy(hdr + 32, &v16, 2);      /* block align */
+    v16 = 16;                  memcpy(hdr + 34, &v16, 2);      /* bits */
+    memcpy(hdr + 36, "data", 4);
+    memcpy(hdr + 40, &data, 4);
+    fseek(fo, 0, SEEK_SET);
+    fwrite(hdr, 1, sizeof(hdr), fo);
+    fclose(fo);
+    return 0;
 }
 
 /* One window: OPEN, record, WORKING, transcribe. The text, cleaned. */
@@ -498,6 +562,7 @@ static void *loop_main(void *arg)
     static const char *CLIPS[N_CLIPS] = { "vl_0", "vl_1", "vl_2", "vl_3" };
     int ci = 0;
     double last_request = -1e9;
+    const char *prev = NULL;     /* the clip before `just`, searched with it */
     (void)arg;
 
     if (whisper_bridge_load_model(s_model) != 0) {
@@ -529,11 +594,24 @@ static void *loop_main(void *arg)
         if (rec_start(CLIPS[ci]) != 0)
             break;
         s_clips++;
-        hit = trigger_in(just);
+        /* Search the previous clip and this one together: each boundary is
+         * then seen twice, once from each side. Only two clips (about twelve
+         * seconds) are ever on disk; the older is dropped after the search. */
+        if (prev && join_clips(prev, just, "vl_pair") == 0) {
+            hit = trigger_in("vl_pair");
+            discard("vl_pair");
+        } else {
+            hit = trigger_in(just);
+        }
         if (hit < 0) {
-            discard(just);
+            if (prev)
+                discard(prev);
+            prev = just;
             continue;
         }
+        if (prev)
+            discard(prev);
+        prev = NULL;            /* a fresh start after a phrase: it cannot fire twice */
         s_triggers++;
         if (now_s() - last_request < s_cfg.cooldown_secs) {
             LOGI("trigger within cooldown - ignored");
@@ -555,6 +633,9 @@ static void *loop_main(void *arg)
     }
     rec_stop();
     discard(CLIPS[ci]);
+    if (prev)
+        discard(prev);
+    discard("vl_pair");
     pthread_mutex_lock(&s_lock);
     s_state = ST_STOPPED;
     pthread_mutex_unlock(&s_lock);
@@ -665,7 +746,7 @@ int kanaha_voice_loop_start(const kvl_config_t *cfg, char *err, int err_len)
         return -1;
     }
     memset(&s_cfg, 0, sizeof(s_cfg));
-    s_cfg.clip_secs = (cfg && cfg->clip_secs > 0) ? cfg->clip_secs : 6.0;
+    s_cfg.clip_secs = (cfg && cfg->clip_secs > 0) ? cfg->clip_secs : 3.0;
     s_cfg.spec_secs = (cfg && cfg->spec_secs > 0) ? cfg->spec_secs : 8.0;
     s_cfg.cooldown_secs = (cfg && cfg->cooldown_secs > 0) ? cfg->cooldown_secs : 4.0;
     s_cfg.min_confidence = (cfg && cfg->min_confidence > 0) ? cfg->min_confidence : 0.5f;

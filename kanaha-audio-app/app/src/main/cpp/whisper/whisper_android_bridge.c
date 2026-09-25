@@ -451,6 +451,13 @@ static int whisper_bridge_search_keywords_unlocked(
      * exact word against exact word, so a transcript that degrades by one
      * syllable is a trigger that never fires, and nobody can tell it was
      * heard at all. The cost is paid here, where it can be seen. */
+    /* No temperature fallback. When a decode looks poor, whisper re-runs it
+     * at rising temperatures -- up to five more full passes -- which is worth
+     * it for open transcription and worthless for spotting fixed phrases: on
+     * the voice loop it turned a 4 s search into 9 s, 21 s once, and the
+     * person waiting for the cue tone gave up. One pass keeps every search
+     * the same length. Transcription keeps the fallback. */
+    wparams.temperature_inc  = 0.0f;
 
     int rc = whisper_full(g_whisper_ctx, wparams, pcmf32, n_samples);
     free(pcmf32);  /* Audio data no longer needed after inference */

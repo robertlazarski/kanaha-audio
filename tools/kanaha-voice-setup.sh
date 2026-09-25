@@ -60,7 +60,7 @@ fi
 [[ -n "$CAMERA" ]] || CAMERA="$CALCS"
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-printf '{"calcs": {"host": "%s", "port": %d, "verify_name": "%s"},\n "camera": {"host": "%s", "port": %d, "verify_name": "%s"},\n "loop": {"autostart": %s, "clip_secs": 6, "spec_secs": 8}}\n' \
+printf '{"calcs": {"host": "%s", "port": %d, "verify_name": "%s"},\n "camera": {"host": "%s", "port": %d, "verify_name": "%s"},\n "loop": {"autostart": %s, "clip_secs": 3, "spec_secs": 8}}\n' \
     "$CALCS" "$PORT" "$NAME" "$CAMERA" "$CAMERA_PORT" "$CAMERA_NAME" "$AUTOSTART" > "$TMP/voice.json"
 
 A=(adb -s "$SERIAL")

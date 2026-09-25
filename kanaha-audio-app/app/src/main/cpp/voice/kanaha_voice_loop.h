@@ -28,7 +28,10 @@
 #include <stddef.h>
 
 typedef struct {
-    double clip_secs;       /* trigger clip length; 0 = 6 (the trials' setting) */
+    double clip_secs;       /* wait between trigger searches; 0 = 3. A clip runs
+                             * this long plus the search it overlaps, and each is
+                             * searched with the one before, so a short gap costs
+                             * no phrases and shortens the wait for the tone. */
     double spec_secs;       /* dictation and answer windows; 0 = 8 */
     double cooldown_secs;   /* after a request, ignore triggers; 0 = 4 */
     float min_confidence;   /* trigger floor; 0 = 0.5 */
