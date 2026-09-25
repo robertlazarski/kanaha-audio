@@ -24,6 +24,8 @@
 
 static const char *OUT[] = { "SILENT", "ASK", "REFUSE", "RUN" };
 
+static kc_cache_t measured;          /* the vols the file last gave, for route B */
+
 static void turn(const kr_context_t *ctx, kr_session_t *s, axis2_h2_json_client_t *c,
                  const axutil_env_t *env, const char *said)
 {
@@ -35,7 +37,7 @@ static void turn(const kr_context_t *ctx, kr_session_t *s, axis2_h2_json_client_
     printf("> %s\n  %s: %s\n", said, OUT[r.outcome], r.say);
     if (r.outcome != KR_RUN)
         return;
-    kc_execute(c, env, &r.spec, &x);
+    kc_execute(c, env, &r.spec, &measured, &x);
     ka_answer(&r.spec, &x, answer, sizeof(answer), say, sizeof(say), trace, sizeof(trace));
     printf("  ANSWER: %s\n  SAY: %s\n", answer, say);
     if (trace[0])

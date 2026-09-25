@@ -106,13 +106,25 @@ static int take_vols(json_object *r, int n, double *vols)
     return 1;
 }
 
+static void cache_key(const kr_spec_t *sp, char *key, size_t len)
+{
+    int i;
+    snprintf(key, len, "%s|%d", sp->file ? sp->file->name : "", sp->max_obs);
+    for (i = 0; i < sp->n_assets; i++) {
+        size_t l = strlen(key);
+        snprintf(key + l, len - l, "|%s", sp->tickers[i]);
+    }
+}
+
 void kc_execute(axis2_h2_json_client_t *client, const axutil_env_t *env,
-                const kr_spec_t *sp, kc_result_t *out)
+                const kr_spec_t *sp, kc_cache_t *cache, kc_result_t *out)
 {
     double m[KR_MAX_ASSETS * KR_MAX_ASSETS];
     int n = sp->n_assets, i;
     long t0 = now_ms();
     json_object *req, *r;
+    char key[512];
+    int from_cache = 0;
 
     memset(out, 0, sizeof(*out));
     snprintf(out->request_id, sizeof(out->request_id), "kv-%s-%s-%s",
@@ -121,8 +133,16 @@ void kc_execute(axis2_h2_json_client_t *client, const axutil_env_t *env,
              sp->regime == KR_REGIME_STRESSED ? "stress" : "hypo",
              sp->book ? sp->book->name : "names");
 
-    /* 1. The matrix: from the file, or chosen. */
-    if (sp->regime != KR_REGIME_HYPOTHETICAL) {
+    /* 1. The matrix: from the file, or chosen. A stressed request whose
+     * vols were measured already takes them as they were: route B. */
+    cache_key(sp, key, sizeof(key));
+    if (sp->regime == KR_REGIME_STRESSED && cache && cache->valid && strcmp(cache->key, key) == 0) {
+        for (i = 0; i < n; i++) out->vols[i] = cache->vols[i];
+        snprintf(out->first_date, sizeof(out->first_date), "%s", cache->first_date);
+        snprintf(out->last_date, sizeof(out->last_date), "%s", cache->last_date);
+        out->n_obs = cache->n_obs;
+        from_cache = 1;
+    } else if (sp->regime != KR_REGIME_HYPOTHETICAL) {
         json_object *cols = json_object_new_array();
         const char *d;
         for (i = 0; i < n; i++) {
@@ -148,6 +168,14 @@ void kc_execute(axis2_h2_json_client_t *client, const axutil_env_t *env,
         if ((d = str(r, "last_row_date"))) snprintf(out->last_date, sizeof(out->last_date), "%s", d);
         out->n_obs = (int)num(r, "n_obs_used");
         json_object_put(r);
+        if (cache) {
+            cache->valid = 1;
+            snprintf(cache->key, sizeof(cache->key), "%s", key);
+            for (i = 0; i < n; i++) cache->vols[i] = out->vols[i];
+            snprintf(cache->first_date, sizeof(cache->first_date), "%s", out->first_date);
+            snprintf(cache->last_date, sizeof(cache->last_date), "%s", out->last_date);
+            cache->n_obs = out->n_obs;
+        }
     } else {
         for (i = 0; i < n; i++) out->vols[i] = sp->vol;
     }
@@ -201,6 +229,7 @@ void kc_execute(axis2_h2_json_client_t *client, const axutil_env_t *env,
     }
     out->calc_time_us = (long)num(r, "calc_time_us");
     json_object_put(r);
+    out->vols_reused = from_cache;
     out->ok = 1;
 done:
     out->round_trip_ms = now_ms() - t0;

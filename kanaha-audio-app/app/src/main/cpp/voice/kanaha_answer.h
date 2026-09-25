@@ -54,6 +54,7 @@ typedef struct {
     long calc_time_us;              /* of the final operation, from the response */
     long round_trip_ms;             /* every call, measured on this phone */
     char tools[128];                /* "covarianceFromCsv,portfolioVariance" */
+    int vols_reused;                /* stressed: the vols came from an earlier read, no file opened */
     char request_id[96];            /* "kv-<op>-<regime>-<book>" */
 } kc_result_t;
 

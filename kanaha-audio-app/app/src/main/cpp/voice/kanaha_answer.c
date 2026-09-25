@@ -121,6 +121,7 @@ static void trace_line(const kr_spec_t *sp, const kc_result_t *r, char *t, int l
         cat(t, len, " | source=%s:*_AdjClose | window=%s..%s | obs=%d | periods_per_year=252",
             sp->file->name, r->first_date, r->last_date, r->n_obs);
         if (sp->max_obs > 0) cat(t, len, " | max_obs=%d", sp->max_obs);
+        if (r->vols_reused) cat(t, len, " | vols=measured-earlier (no file opened)");
     } else {
         cat(t, len, " | source=- | window=- | obs=-");
     }

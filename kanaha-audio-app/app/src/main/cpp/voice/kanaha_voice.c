@@ -36,6 +36,7 @@ static kr_file_t s_files_cat[KR_MAX_FILES];
 static kr_context_t s_ctx;
 static int s_ready;             /* books loaded and catalog fetched */
 static kr_session_t s_session;
+static kc_cache_t s_measured;       /* the vols the file last gave, for route B */
 
 static const char *OUTCOME[] = { "SILENT", "ASK", "REFUSE", "RUN" };
 
@@ -193,7 +194,7 @@ int kanaha_voice_request(const char *transcript, int speak, char *out, size_t si
     if (speak && r.outcome != KR_SILENT)
         say_now(r.say);             /* the read-back, before anything runs */
     if (r.outcome == KR_RUN) {
-        kc_execute(s_client, s_env, &r.spec, &x);
+        kc_execute(s_client, s_env, &r.spec, &s_measured, &x);
         ka_answer(&r.spec, &x, answer, sizeof(answer), say, sizeof(say), trace, sizeof(trace));
         if (!x.ok)
             s_ready = 0;            /* refetch the catalog next time: the phone may have changed */
@@ -300,6 +301,7 @@ void kanaha_voice_reset(void)
 {
     pthread_mutex_lock(&s_lock);
     kr_session_init(&s_session);
+    memset(&s_measured, 0, sizeof(s_measured));
     s_ready = 0;
     if (s_client) {                 /* voice.json may name another phone now */
         axis2_h2_json_client_free(s_client, s_env);
