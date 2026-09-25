@@ -56,8 +56,31 @@ typedef struct { char when[16]; char heard[256]; char outcome[16]; char said[256
 static entry_t s_hist[HISTORY];
 static int s_hist_n, s_hist_next;
 
+/* Things for someone else to act on -- today only the demo's app switch,
+ * which the laptop polls for and performs over adb. Numbered, so a poller
+ * acts on each once: it remembers the last seq it handled. */
+#define EVENTS 8
+typedef struct { long seq; char when[16]; char what[32]; } event_t;
+static event_t s_events[EVENTS];
+static int s_ev_n, s_ev_next;
+static long s_ev_seq;
+
 static const char *TRIGGERS[] = { "calculate", "run it", "stress it", "simulate it" };
 #define N_TRIGGERS 4
+
+/* Everything the trigger clips are searched for: the calculation triggers,
+ * then the phrases that act by themselves, with no dictation window. The
+ * camera is the one thing that changes state, so it has its own phrase,
+ * never reachable from dictation. "change the demo" is matched without its
+ * "Claude, ... to Kanaha Calcs": whisper hears "Claude" as "cloud" and
+ * "Kanaha" several ways, and the three words in the middle are enough. */
+#define KW_CAMERA_START  N_TRIGGERS
+#define KW_CAMERA_STOP   (N_TRIGGERS + 1)
+#define KW_SWITCH        (N_TRIGGERS + 2)
+static const char *KEYWORDS[] = { "calculate", "run it", "stress it", "simulate it",
+                                  "start the cameras please", "stop the cameras please",
+                                  "change the demo" };
+#define N_KEYWORDS 7
 
 /* Said inside a window, any of these throws the utterance away. Decided here,
  * not by the resolver: a cancel must cost nothing and must be impossible to
@@ -75,6 +98,11 @@ static const tone_t CUE_OPEN[]    = { { 1000, 200 } };
 static const tone_t CUE_WORKING[] = { { 600, 90 } };
 static const tone_t CUE_DROPPED[] = { { 880, 140 }, { 440, 240 } };
 static const tone_t CUE_NOTHING[] = { { 330, 420 } };
+/* Rising: the camera is rolling. Falling: it has stopped. Played only once the
+ * camera phone has confirmed -- a tone on the request would say "rolling"
+ * about a camera that is not. */
+static const tone_t CUE_CAM_START[] = { { 660, 120 }, { 990, 180 } };
+static const tone_t CUE_CAM_STOP[]  = { { 990, 120 }, { 660, 180 } };
 #define CUE(t) cue(t, (int)(sizeof(t) / sizeof(t[0])))
 
 static double now_s(void)
@@ -237,7 +265,7 @@ static int trigger_in(const char *clip)
     int i, j;
     memset(&r, 0, sizeof(r));
     clip_path(clip, path, sizeof(path));
-    if (whisper_bridge_search_keywords(path, TRIGGERS, N_TRIGGERS, NULL, &r) != 0) {
+    if (whisper_bridge_search_keywords(path, KEYWORDS, N_KEYWORDS, NULL, &r) != 0) {
         /* A failed search must not look like a quiet room. */
         pthread_mutex_lock(&s_lock);
         snprintf(s_last_error, sizeof(s_last_error), "keyword search failed on %s", path);
@@ -245,14 +273,14 @@ static int trigger_in(const char *clip)
         return -1;
     }
     for (i = 0; i < r.num_matches; i++) {
-        for (j = 0; j < N_TRIGGERS; j++) {
+        for (j = 0; j < N_KEYWORDS; j++) {
             char kw[128];
             size_t k;
             for (k = 0; r.matches[i].keyword[k] && k < sizeof(kw) - 1; k++)
                 kw[k] = (char)tolower((unsigned char)r.matches[i].keyword[k]);
             kw[k] = '\0';
-            if (strstr(kw, TRIGGERS[j]) && r.matches[i].confidence >= s_cfg.min_confidence) {
-                LOGI("[clip %s] trigger '%s' at %.2f", clip, TRIGGERS[j], r.matches[i].confidence);
+            if (strstr(kw, KEYWORDS[j]) && r.matches[i].confidence >= s_cfg.min_confidence) {
+                LOGI("[clip %s] trigger '%s' at %.2f", clip, KEYWORDS[j], r.matches[i].confidence);
                 return j;
             }
         }
@@ -295,6 +323,45 @@ static void remember_said(const char *heard, const char *outcome, const char *sa
 static void remember(const char *heard, const char *outcome)
 {
     remember_said(heard, outcome, NULL);
+}
+
+static void post_event(const char *what)
+{
+    event_t *e;
+    time_t t = time(NULL);
+    struct tm tmv;
+    pthread_mutex_lock(&s_lock);
+    e = &s_events[s_ev_next];
+    e->seq = ++s_ev_seq;
+    localtime_r(&t, &tmv);
+    strftime(e->when, sizeof(e->when), "%H:%M:%S", &tmv);
+    snprintf(e->what, sizeof(e->what), "%s", what);
+    s_ev_next = (s_ev_next + 1) % EVENTS;
+    if (s_ev_n < EVENTS) s_ev_n++;
+    pthread_mutex_unlock(&s_lock);
+    LOGI("[event %ld] %s", s_ev_seq, what);
+}
+
+/* A phrase that acts by itself: the camera, or the demo's app switch. */
+static void handle_action(int kw)
+{
+    char err[256];
+    rec_stop();
+    if (kw == KW_CAMERA_START || kw == KW_CAMERA_STOP) {
+        int start = kw == KW_CAMERA_START;
+        if (kanaha_voice_camera(start, err, sizeof(err)) == 0) {
+            remember_said(KEYWORDS[kw], start ? "CAMERA_ON" : "CAMERA_OFF", NULL);
+            if (start) CUE(CUE_CAM_START); else CUE(CUE_CAM_STOP);
+        } else {
+            remember_said(KEYWORDS[kw], "CAMERA_ERROR", err);
+            CUE(CUE_NOTHING);
+            kanaha_voice_say(err);
+        }
+    } else if (kw == KW_SWITCH) {
+        post_event("switch-to-calcs");
+        remember_said(KEYWORDS[kw], "SWITCH", "Changing the demo to Kanaha Calcs.");
+        kanaha_voice_say("Changing the demo to Kanaha Calcs.");
+    }
 }
 
 /* The request after a trigger in `trigger_clip`; `bridge_clip` was recording
@@ -446,7 +513,10 @@ static void *loop_main(void *arg)
             LOGI("trigger within cooldown - ignored");
             continue;
         }
-        handle_request(just, CLIPS[ci]);
+        if (hit >= N_TRIGGERS)
+            handle_action(hit);
+        else
+            handle_request(just, CLIPS[ci]);
         last_request = now_s();
         discard(just);
         discard(CLIPS[ci]);
@@ -640,6 +710,19 @@ void kanaha_voice_loop_status(char *out, size_t size)
             json_object_array_add(h, x);
         }
         json_object_object_add(o, "history", h);
+    }
+    {
+        json_object *ev = json_object_new_array();
+        int i;
+        for (i = 0; i < s_ev_n; i++) {
+            event_t *e = &s_events[(s_ev_next - s_ev_n + i + EVENTS) % EVENTS];
+            json_object *x = json_object_new_object();
+            json_object_object_add(x, "seq", json_object_new_int64(e->seq));
+            json_object_object_add(x, "when", json_object_new_string(e->when));
+            json_object_object_add(x, "what", json_object_new_string(e->what));
+            json_object_array_add(ev, x);
+        }
+        json_object_object_add(o, "events", ev);
     }
     pthread_mutex_unlock(&s_lock);
     snprintf(out, size, "%s", json_object_to_json_string_ext(o, JSON_C_TO_STRING_PLAIN));

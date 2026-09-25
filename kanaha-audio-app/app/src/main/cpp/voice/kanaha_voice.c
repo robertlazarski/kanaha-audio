@@ -15,6 +15,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -29,6 +30,7 @@ static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
 static char s_files[512];
 static axutil_env_t *s_env;
 static axis2_h2_json_client_t *s_client;
+static axis2_h2_json_client_t *s_cam_client;
 static kr_book_t s_books[KR_MAX_BOOKS];
 static kr_file_t s_files_cat[KR_MAX_FILES];
 static kr_context_t s_ctx;
@@ -53,6 +55,40 @@ static void fail(char *out, size_t size, const char *why)
     snprintf(out, size, "%s", json_object_to_json_string_ext(o, JSON_C_TO_STRING_PLAIN));
     json_object_put(o);
     LOGE("%s", why);
+}
+
+/* A client for one of voice.json's targets ("calcs" or "camera"), with this
+ * phone's own certificate. NULL with err set when it is not configured. */
+static axis2_h2_json_client_t *client_for(const char *target, char *err, int err_len)
+{
+    char path[640], crt[640], key[640], ca[640];
+    json_object *cfg, *t, *v;
+    axis2_h2_json_client_options_t o;
+    axis2_h2_json_client_t *c;
+
+    snprintf(path, sizeof(path), "%s/voice/voice.json", s_files);
+    cfg = json_object_from_file(path);
+    if (!cfg || !json_object_object_get_ex(cfg, target, &t)) {
+        snprintf(err, (size_t)err_len, "no %s phone is configured in %s", target, path);
+        if (cfg) json_object_put(cfg);
+        return NULL;
+    }
+    snprintf(crt, sizeof(crt), "%s/apache/ssl/server.crt", s_files);
+    snprintf(key, sizeof(key), "%s/apache/ssl/server.key", s_files);
+    snprintf(ca, sizeof(ca), "%s/apache/ssl/ca.crt", s_files);
+    memset(&o, 0, sizeof(o));
+    if (json_object_object_get_ex(t, "host", &v)) o.host = json_object_get_string(v);
+    if (json_object_object_get_ex(t, "port", &v)) o.port = json_object_get_int(v);
+    if (json_object_object_get_ex(t, "verify_name", &v)) o.verify_name = json_object_get_string(v);
+    o.ca_file = ca;
+    o.cert_file = crt;
+    o.key_file = key;
+    c = axis2_h2_json_client_create(s_env, &o);
+    json_object_put(cfg);           /* the client copied the strings */
+    if (!c)
+        snprintf(err, (size_t)err_len, "cannot set up the connection to the %s phone (check "
+                 "voice.json and this phone's provisioning)", target);
+    return c;
 }
 
 /* Create the client from voice.json and this phone's certificates. */
@@ -185,6 +221,67 @@ int kanaha_voice_request(const char *transcript, int speak, char *out, size_t si
     return 0;
 }
 
+int kanaha_voice_camera(int start, char *err, int err_len)
+{
+    char clip[48], body[96];
+    const char *op = start ? "startRecording" : "stopRecording";
+    char path[128];
+    axis2_char_t *resp = NULL;
+    size_t len = 0;
+    int status = 0, rc = -1;
+    json_object *r, *v;
+
+    pthread_mutex_lock(&s_lock);
+    if (!s_env) {
+        axutil_allocator_t *a = axutil_allocator_init(NULL);
+        char logp[640];
+        snprintf(logp, sizeof(logp), "%s/voice/kanaha-voice.log", s_files);
+        s_env = axutil_env_create_with_error_log(a, axutil_error_create(a),
+                                                 axutil_log_create(a, NULL, logp));
+    }
+    if (!s_cam_client && !(s_cam_client = client_for("camera", err, err_len))) {
+        pthread_mutex_unlock(&s_lock);
+        return -1;
+    }
+    if (start) {
+        time_t t = time(NULL);
+        struct tm tmv;
+        localtime_r(&t, &tmv);
+        strftime(clip, sizeof(clip), "voice_%H%M%S", &tmv);
+        snprintf(body, sizeof(body), "{\"clip_name\":\"%s\"}", clip);
+    } else {
+        snprintf(body, sizeof(body), "{}");
+    }
+    snprintf(path, sizeof(path), "/services/CameraControlService/%s", op);
+    if (axis2_h2_json_client_post(s_cam_client, s_env, path, body, strlen(body), &resp, &len,
+                                  &status) != AXIS2_SUCCESS) {
+        snprintf(err, (size_t)err_len, "I couldn't reach the camera: %s.",
+                 axis2_h2_json_client_get_error(s_cam_client));
+        pthread_mutex_unlock(&s_lock);
+        return -1;
+    }
+    r = json_tokener_parse(resp);
+    AXIS2_FREE(s_env->allocator, resp);
+    if (r && json_object_object_get_ex(r, "success", &v) && json_object_get_boolean(v)) {
+        rc = 0;
+        LOGI("camera %s: confirmed", op);
+    } else {
+        const char *why = NULL;
+        if (r && json_object_object_get_ex(r, "error", &v)) why = json_object_get_string(v);
+        snprintf(err, (size_t)err_len, "The camera refused to %s: %s", start ? "start" : "stop",
+                 why ? why : "no reason given.");
+        LOGE("%s", err);
+    }
+    if (r) json_object_put(r);
+    pthread_mutex_unlock(&s_lock);
+    return rc;
+}
+
+void kanaha_voice_say(const char *text)
+{
+    say_now(text);
+}
+
 int kanaha_voice_prepare(char *err, int err_len)
 {
     int rc;
@@ -207,6 +304,10 @@ void kanaha_voice_reset(void)
     if (s_client) {                 /* voice.json may name another phone now */
         axis2_h2_json_client_free(s_client, s_env);
         s_client = NULL;
+    }
+    if (s_cam_client) {
+        axis2_h2_json_client_free(s_cam_client, s_env);
+        s_cam_client = NULL;
     }
     pthread_mutex_unlock(&s_lock);
 }

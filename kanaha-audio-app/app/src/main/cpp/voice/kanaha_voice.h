@@ -10,7 +10,9 @@
  * Configuration lives under the app's files directory:
  *
  *   voice/voice.json          {"calcs": {"host": "192.168.8.159", "port": 8444,
- *                                        "verify_name": "calcs.local"}}
+ *                                        "verify_name": "calcs.local"},
+ *                              "camera": {"host": "192.168.8.159", "port": 8443,
+ *                                         "verify_name": "camera.local"}}
  *   voice/kanaha-books.json   the books, same file the orchestrator reads
  *   apache/ssl/server.crt     this phone's certificate (clientAuth), its key,
  *   apache/ssl/server.key     and the CA the calcs phone's certificate
@@ -35,6 +37,15 @@ void kanaha_voice_init(const char *files_dir);
  * When speak is set, says the read-back or question, then the SAY line.
  * Returns 0, or -1 with {"success":false,"error":"..."} in json_out. */
 int kanaha_voice_request(const char *transcript, int speak, char *json_out, size_t out_size);
+
+/* Start (1) or stop (0) recording on the camera phone, over HTTP/2 + mTLS
+ * with this phone's certificate. 0 once the camera has confirmed it, or -1
+ * with a sayable reason in err. The camera is the one thing here that changes
+ * state, so it has its own phrase and no read-back: the effect is visible. */
+int kanaha_voice_camera(int start, char *err, int err_len);
+
+/* Say a line on this phone's speaker (flite). Blocks until it has been said. */
+void kanaha_voice_say(const char *text);
 
 /* Load the books, connect to the calcs phone and fetch its catalog now, so a
  * bad configuration shows at startup rather than on the first spoken request.
