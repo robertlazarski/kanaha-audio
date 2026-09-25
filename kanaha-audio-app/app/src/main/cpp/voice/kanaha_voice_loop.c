@@ -64,6 +64,9 @@ typedef struct { long seq; char when[16]; char what[32]; } event_t;
 static event_t s_events[EVENTS];
 static int s_ev_n, s_ev_next;
 static long s_ev_seq;
+/* Changes each time the loop starts, so a poller can tell a restarted phone
+ * (its events numbered from 1 again) from one it has already heard from. */
+static long s_session;
 
 static const char *TRIGGERS[] = { "calculate", "run it", "stress it", "simulate it" };
 #define N_TRIGGERS 4
@@ -71,16 +74,35 @@ static const char *TRIGGERS[] = { "calculate", "run it", "stress it", "simulate 
 /* Everything the trigger clips are searched for: the calculation triggers,
  * then the phrases that act by themselves, with no dictation window. The
  * camera is the one thing that changes state, so it has its own phrase,
- * never reachable from dictation. "change the demo" is matched without its
- * "Claude, ... to Kanaha Calcs": whisper hears "Claude" as "cloud" and
- * "Kanaha" several ways, and the three words in the middle are enough. */
+ * never reachable from dictation.
+ *
+ * The switch to calcs is said "show the numbers please" and matched on its
+ * last two words only. tiny.en on this phone runs "show the" together: the
+ * spoken trials of 2026-09-24 came back "Showed at numbers please" twice,
+ * while "numbers" and "please" came through at 0.99 and 0.94. No names in any
+ * of it -- whisper hears "Claude" as "cloud" and "Kanaha" several ways. */
 #define KW_CAMERA_START  N_TRIGGERS
 #define KW_CAMERA_STOP   (N_TRIGGERS + 1)
 #define KW_SWITCH        (N_TRIGGERS + 2)
-static const char *KEYWORDS[] = { "calculate", "run it", "stress it", "simulate it",
-                                  "start the cameras please", "stop the cameras please",
-                                  "change the demo" };
-#define N_KEYWORDS 7
+
+/* Each phrase searched for, and what it does. A phrase may be listed in the
+ * forms whisper actually writes: "stop the" and "start the" run together on
+ * tiny.en the way "show the" did ("Showed at numbers please"), so the
+ * run-together forms of the camera phrases are listed with them. The verb
+ * still decides start or stop, and the rising or falling pair says which. */
+static const struct { const char *phrase; int action; } KEYWORDS[] = {
+    { "calculate", 0 }, { "run it", 1 }, { "stress it", 2 }, { "simulate it", 3 },
+    { "start the cameras please", KW_CAMERA_START },
+    { "started the cameras please", KW_CAMERA_START },
+    { "start a cameras please", KW_CAMERA_START },
+    { "start the camera please", KW_CAMERA_START },
+    { "stop the cameras please", KW_CAMERA_STOP },
+    { "stopped the cameras please", KW_CAMERA_STOP },
+    { "stop a cameras please", KW_CAMERA_STOP },
+    { "stop the camera please", KW_CAMERA_STOP },
+    { "numbers please", KW_SWITCH },
+};
+#define N_KEYWORDS ((int)(sizeof(KEYWORDS) / sizeof(KEYWORDS[0])))
 
 /* Said inside a window, any of these throws the utterance away. Decided here,
  * not by the resolver: a cancel must cost nothing and must be impossible to
@@ -265,7 +287,10 @@ static int trigger_in(const char *clip)
     int i, j;
     memset(&r, 0, sizeof(r));
     clip_path(clip, path, sizeof(path));
-    if (whisper_bridge_search_keywords(path, KEYWORDS, N_KEYWORDS, NULL, &r) != 0) {
+    const char *phrases[N_KEYWORDS];
+    for (i = 0; i < N_KEYWORDS; i++)
+        phrases[i] = KEYWORDS[i].phrase;
+    if (whisper_bridge_search_keywords(path, phrases, N_KEYWORDS, NULL, &r) != 0) {
         /* A failed search must not look like a quiet room. */
         pthread_mutex_lock(&s_lock);
         snprintf(s_last_error, sizeof(s_last_error), "keyword search failed on %s", path);
@@ -279,9 +304,9 @@ static int trigger_in(const char *clip)
             for (k = 0; r.matches[i].keyword[k] && k < sizeof(kw) - 1; k++)
                 kw[k] = (char)tolower((unsigned char)r.matches[i].keyword[k]);
             kw[k] = '\0';
-            if (strstr(kw, KEYWORDS[j]) && r.matches[i].confidence >= s_cfg.min_confidence) {
-                LOGI("[clip %s] trigger '%s' at %.2f", clip, KEYWORDS[j], r.matches[i].confidence);
-                return j;
+            if (strcmp(kw, KEYWORDS[j].phrase) == 0 && r.matches[i].confidence >= s_cfg.min_confidence) {
+                LOGI("[clip %s] trigger '%s' at %.2f", clip, KEYWORDS[j].phrase, r.matches[i].confidence);
+                return KEYWORDS[j].action;
             }
         }
     }
@@ -350,16 +375,17 @@ static void handle_action(int kw)
     if (kw == KW_CAMERA_START || kw == KW_CAMERA_STOP) {
         int start = kw == KW_CAMERA_START;
         if (kanaha_voice_camera(start, err, sizeof(err)) == 0) {
-            remember_said(KEYWORDS[kw], start ? "CAMERA_ON" : "CAMERA_OFF", NULL);
+            remember_said(start ? "start the cameras" : "stop the cameras",
+                          start ? "CAMERA_ON" : "CAMERA_OFF", NULL);
             if (start) CUE(CUE_CAM_START); else CUE(CUE_CAM_STOP);
         } else {
-            remember_said(KEYWORDS[kw], "CAMERA_ERROR", err);
+            remember_said(start ? "start the cameras" : "stop the cameras", "CAMERA_ERROR", err);
             CUE(CUE_NOTHING);
             kanaha_voice_say(err);
         }
     } else if (kw == KW_SWITCH) {
         post_event("switch-to-calcs");
-        remember_said(KEYWORDS[kw], "SWITCH", "Changing the demo to Kanaha Calcs.");
+        remember_said("show the numbers please", "SWITCH", "Changing the demo to Kanaha Calcs.");
         kanaha_voice_say("Changing the demo to Kanaha Calcs.");
     }
 }
@@ -646,6 +672,9 @@ int kanaha_voice_loop_start(const kvl_config_t *cfg, char *err, int err_len)
     snprintf(s_model, sizeof(s_model), "%s", (cfg && cfg->model && cfg->model[0]) ? cfg->model : "tiny.en");
     s_cfg.keep_clips = cfg ? cfg->keep_clips : 0;
     s_clips = s_triggers = s_requests = 0;
+    s_session = (long)time(NULL);
+    s_ev_n = s_ev_next = 0;
+    s_ev_seq = 0;
     s_last_heard[0] = s_last_outcome[0] = s_last_error[0] = '\0';
     s_stop = 0;
     s_state = ST_STARTING;
@@ -694,6 +723,7 @@ void kanaha_voice_loop_status(char *out, size_t size)
     json_object_object_add(o, "clips", json_object_new_int64(s_clips));
     json_object_object_add(o, "triggers", json_object_new_int64(s_triggers));
     json_object_object_add(o, "requests", json_object_new_int64(s_requests));
+    json_object_object_add(o, "session", json_object_new_int64(s_session));
     json_object_object_add(o, "last_heard", json_object_new_string(s_last_heard));
     json_object_object_add(o, "last_outcome", json_object_new_string(s_last_outcome));
     json_object_object_add(o, "last_error", json_object_new_string(s_last_error));
