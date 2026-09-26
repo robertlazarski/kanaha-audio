@@ -1,6 +1,17 @@
 /*
  * Kanaha Audio - the voice request path inside the audio service
  * Licensed under the Apache License, Version 2.0
+ *
+ * The glue between the voice loop (or an HTTP caller) and the pure parts:
+ *
+ *   kanaha_voice_request  transcript -> kr_resolve -> say the read-back
+ *                         -> kc_execute -> ka_answer -> say the answer
+ *   kanaha_voice_camera   one startRecording/stopRecording to the camera
+ *
+ * Everything here is process state (the statics below), set up lazily on
+ * the first request by ensure_ready() and dropped by kanaha_voice_reset().
+ * Every entry point takes s_lock for its whole length, which is what makes
+ * requests run one at a time -- including the time spent speaking.
  */
 
 #include "kanaha_voice.h"
@@ -27,13 +38,13 @@
 #endif
 
 static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
-static char s_files[512];
-static axutil_env_t *s_env;
-static axis2_h2_json_client_t *s_client;
-static axis2_h2_json_client_t *s_cam_client;
+static char s_files[512];           /* the app's files directory */
+static axutil_env_t *s_env;         /* one Axis2/C env, logging to voice/kanaha-voice.log */
+static axis2_h2_json_client_t *s_client;        /* to the calcs phone */
+static axis2_h2_json_client_t *s_cam_client;    /* to the camera phone */
 static kr_book_t s_books[KR_MAX_BOOKS];
-static kr_file_t s_files_cat[KR_MAX_FILES];
-static kr_context_t s_ctx;
+static kr_file_t s_files_cat[KR_MAX_FILES];     /* the calcs phone's CSVs */
+static kr_context_t s_ctx;          /* points at s_books and s_files_cat */
 static int s_ready;             /* books loaded and catalog fetched */
 static kr_session_t s_session;
 static kc_cache_t s_measured;       /* the vols the file last gave, for route B */
@@ -48,6 +59,7 @@ void kanaha_voice_init(const char *files_dir)
     pthread_mutex_unlock(&s_lock);
 }
 
+/* {"success":false,"error":why} into out, and the log. */
 static void fail(char *out, size_t size, const char *why)
 {
     json_object *o = json_object_new_object();
@@ -92,7 +104,9 @@ static axis2_h2_json_client_t *client_for(const char *target, char *err, int err
     return c;
 }
 
-/* Create the client from voice.json and this phone's certificates. */
+/* Create the Axis2/C env if needed, then the calcs client from voice.json
+ * and this phone's certificates: what client_for("calcs") does, with an
+ * error that points at the log. */
 static int open_client(char *err, int err_len)
 {
     char path[640], crt[640], key[640], ca[640];
@@ -140,6 +154,9 @@ static int open_client(char *err, int err_len)
     return 0;
 }
 
+/* Everything a request needs, done once: the client, the books, and the
+ * calcs phone's catalog. Caller holds s_lock. A failed request clears
+ * s_ready, so the next one starts over from here. */
 static int ensure_ready(char *err, int err_len)
 {
     char path[640];
@@ -165,6 +182,8 @@ static int ensure_ready(char *err, int err_len)
     return 0;
 }
 
+/* Speak on this phone (flite into the audio directory, then played). Blocks
+ * until said, so the microphone cannot open over it. */
 static void say_now(const char *text)
 {
     audio_speak_result_t spoken;
@@ -173,6 +192,9 @@ static void say_now(const char *text)
         LOGE("could not speak: %.60s", text);
 }
 
+/* The resolver's sentence is spoken first and in full -- the read-back for a
+ * RUN, or the question or refusal, which end the turn -- so the room hears
+ * what will be computed before any number arrives. */
 int kanaha_voice_request(const char *transcript, int speak, char *out, size_t size)
 {
     kr_result_t r;
@@ -232,6 +254,8 @@ int kanaha_voice_camera(int start, char *err, int err_len)
     int status = 0, rc = -1;
     json_object *r, *v;
 
+    /* The camera needs no books or catalog, only the env and its own client,
+     * so it works even when the calcs phone is unreachable. */
     pthread_mutex_lock(&s_lock);
     if (!s_env) {
         axutil_allocator_t *a = axutil_allocator_init(NULL);
@@ -244,7 +268,7 @@ int kanaha_voice_camera(int start, char *err, int err_len)
         pthread_mutex_unlock(&s_lock);
         return -1;
     }
-    if (start) {
+    if (start) {                    /* the camera's clip is named voice_HHMMSS */
         time_t t = time(NULL);
         struct tm tmv;
         localtime_r(&t, &tmv);

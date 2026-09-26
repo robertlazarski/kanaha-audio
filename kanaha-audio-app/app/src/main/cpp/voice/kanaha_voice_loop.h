@@ -49,8 +49,13 @@ void kanaha_voice_loop_stop(void);
 /* Whether the loop holds the microphone (starting, running or stopping). */
 int kanaha_voice_loop_active(void);
 
-/* {"state":"running","clips":N,"triggers":N,"requests":N,
- *  "last_heard":"...","last_outcome":"RUN","last_error":"..."} */
+/* {"state":"running","clips":N,"triggers":N,"requests":N,"session":N,
+ *  "last_heard":"...","last_outcome":"RUN","last_error":"...",
+ *  "history":[{"when","heard","outcome","said"}, ...],
+ *  "events":[{"seq","when","what"}, ...]}
+ * history holds the last 20 outcomes and events the last 8, oldest first.
+ * A poller acts on events with a seq above the last it handled, and starts
+ * over when session changes (the loop restarted, seq is back at 1). */
 void kanaha_voice_loop_status(char *json_out, size_t out_size);
 
 #endif /* KANAHA_VOICE_LOOP_H */

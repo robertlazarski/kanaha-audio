@@ -12,7 +12,7 @@
  *   Phone microphone (hardware)
  *     → AAudio input stream (AAUDIO_DIRECTION_INPUT, 16kHz mono, PCM_I16)
  *     → Data callback (real-time thread, non-blocking)
- *     → Lock-free SPSC ring buffer (~1 second of audio)
+ *     → Lock-free SPSC ring buffer (~2 seconds of audio at 16 kHz)
  *     → Writer pthread (reads ring buffer, writes to WAV file via fwrite)
  *     → WAV file on disk (immediately available for whisper/YAMNet)
  *
@@ -52,6 +52,12 @@
  * to disk. No mutex — only atomic head/tail indices.
  * ======================================================================== */
 
+/* Must stay a power of two. head and tail are kept modulo this size, and
+ * ring_available computes (head - tail) % size in unsigned arithmetic: when
+ * head has wrapped below tail the subtraction wraps modulo 2^32, which gives
+ * the right answer only because 2^32 is a multiple of the size. One slot is
+ * always left empty, so full and empty are distinguishable: the usable
+ * capacity is RING_BUFFER_FRAMES - 1. */
 #define RING_BUFFER_FRAMES  32768  /* ~2 seconds at 16kHz */
 
 typedef struct {
@@ -434,6 +440,8 @@ static int recording_start_impl(void) {
      *   - Mono: single channel (matches whisper.cpp and YAMNet input)
      *   - PCM_I16: 16-bit signed integers (matches WAV format)
      *   - Low latency: minimizes time between mic capture and callback delivery
+     *     (unlike the output streams in audio_tone.c, nothing needs to capture
+     *     this one, so MMAP does no harm here)
      *   - Data callback: audio_data_callback pushes samples into ring buffer */
     AAudioStreamBuilder_setDirection(builder, AAUDIO_DIRECTION_INPUT);
     AAudioStreamBuilder_setSampleRate(builder, s_sample_rate);
@@ -488,10 +496,11 @@ static int recording_start_impl(void) {
  * recording_start_impl() to open the stream.
  *
  * State transitions:
- *   audio_recording_start() sets state to AUDIO_RECORDING_IDLE (validated)
+ *   audio_recording_start() claims the slot: IDLE → SCHEDULED
  *   → thread sleeps until start_at
  *   → recording_start_impl() sets state to AUDIO_RECORDING_ACTIVE
- *   If impl fails, state returns to IDLE.
+ *   If impl fails, state returns to IDLE. A stop() while SCHEDULED moves it
+ *   back to IDLE, and the thread then exits without starting.
  * ======================================================================== */
 
 static void *scheduled_recording_thread(void *arg) {
@@ -515,10 +524,9 @@ static void *scheduled_recording_thread(void *arg) {
 
     /* The start slot was claimed as SCHEDULED when this thread was created.
      * If anything else has happened since (a stop cancelled it, cleanup ran),
-     * the state is no longer SCHEDULED and this start must not proceed. */
-    /* Serialise with stop(). Re-check under the lock: a stop may have cancelled
-     * us (SCHEDULED->IDLE) while we slept. Start under the lock so stop cannot
-     * interleave with initialisation. */
+     * the state is no longer SCHEDULED and this start must not proceed. The
+     * check and the start are both under the lock, so a stop cannot land
+     * between them or in the middle of initialisation. */
     pthread_mutex_lock(&s_lifecycle_lock);
     if (atomic_load(&s_state) != AUDIO_RECORDING_SCHEDULED) {
         pthread_mutex_unlock(&s_lifecycle_lock);
@@ -714,11 +722,14 @@ int audio_recording_is_active(void) {
     return atomic_load(&s_state) != AUDIO_RECORDING_IDLE ? 1 : 0;
 }
 
+/* NULL unless capturing: a scheduled clip has a name but no audio yet. */
 const char *audio_recording_get_clip_name(void) {
     if (atomic_load(&s_state) != AUDIO_RECORDING_ACTIVE) return NULL;
     return s_clip_name;
 }
 
+/* The directory as given to init, unresolved: callers that pass it on to
+ * the whisper bridge must realpath() it first (see kanaha_voice_loop.c). */
 const char *audio_recording_get_audio_dir(void) {
     if (s_audio_dir[0] == '\0') return NULL;
     return s_audio_dir;

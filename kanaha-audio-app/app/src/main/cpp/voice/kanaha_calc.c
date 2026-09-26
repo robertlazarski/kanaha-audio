@@ -1,6 +1,11 @@
 /*
  * Kanaha Audio - calls to Kanaha Calcs for a resolved request
  * Licensed under the Apache License, Version 2.0
+ *
+ * See kanaha_calc.h for the routes. Every call goes through call(), which
+ * posts one operation and turns anything but "status":"SUCCESS" into a
+ * sayable out->error. kc_execute() is two steps: build the matrix (from the
+ * file, from the cache, or from spoken vols), then run the operation on it.
  */
 
 #include "kanaha_calc.h"
@@ -18,6 +23,8 @@ static long now_ms(void)
     return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+/* JSON accessors. A missing number reads as 0 and a missing or non-string
+ * string as NULL, so callers check what matters and ignore the rest. */
 static double num(json_object *o, const char *key)
 {
     json_object *v;
@@ -41,7 +48,11 @@ static json_object *doubles(const double *v, int n)
 }
 
 /* POST one operation; the parsed response, or NULL with out->error set.
- * Takes ownership of `req`. A service refusal is quoted as it came. */
+ * Takes ownership of `req`. A service refusal is quoted as it came.
+ * Three kinds of failure, each worded for the room: unreachable (transport),
+ * not JSON, and refused (the service's own error_message). On success the
+ * operation is appended to out->tools, which is how the trace shows the
+ * route taken. */
 static json_object *call(axis2_h2_json_client_t *client, const axutil_env_t *env,
                          const char *op, json_object *req, kc_result_t *out)
 {
@@ -94,6 +105,7 @@ static int take_matrix(json_object *r, int n, double *m)
     return 1;
 }
 
+/* The response's volatilities into vols (n); 0 on a wrong shape. */
 static int take_vols(json_object *r, int n, double *vols)
 {
     json_object *a;
@@ -106,6 +118,8 @@ static int take_vols(json_object *r, int n, double *vols)
     return 1;
 }
 
+/* "file|max_obs|MSFT|AAPL|...": cached vols are reused only for the same
+ * file, the same window and the same names in the same order. */
 static void cache_key(const kr_spec_t *sp, char *key, size_t len)
 {
     int i;
@@ -134,7 +148,15 @@ void kc_execute(axis2_h2_json_client_t *client, const axutil_env_t *env,
              sp->book ? sp->book->name : "names");
 
     /* 1. The matrix: from the file, or chosen. A stressed request whose
-     * vols were measured already takes them as they were: route B. */
+     * vols were measured already takes them as they were: route B.
+     *
+     * Three branches, then one more call for the non-historical regimes:
+     *   stressed, cached  vols and dates from the cache; no call yet
+     *   historical, or    covarianceFromCsv: the file's matrix into m, its
+     *   stressed uncached vols into out->vols, and the cache refreshed
+     *   hypothetical      every vol is the spoken one; no call yet
+     * then, unless historical, composeCovariance replaces m with the matrix
+     * built from out->vols and the one spoken correlation. */
     cache_key(sp, key, sizeof(key));
     if (sp->regime == KR_REGIME_STRESSED && cache && cache->valid && strcmp(cache->key, key) == 0) {
         for (i = 0; i < n; i++) out->vols[i] = cache->vols[i];
@@ -197,7 +219,8 @@ void kc_execute(axis2_h2_json_client_t *client, const axutil_env_t *env,
     }
     for (i = 0; i < n; i++) out->sigma_trace += m[i * n + i];
 
-    /* 2. The operation. */
+    /* 2. The operation. A simulation is 252 steps at 252 per year: one year
+     * of trading days, on a million (KC_INITIAL_VALUE). */
     req = json_object_new_object();
     json_object_object_add(req, "n_assets", json_object_new_int(n));
     json_object_object_add(req, "weights", doubles(sp->weights, n));
@@ -239,6 +262,12 @@ done:
 /* loaders                                                                   */
 /* ------------------------------------------------------------------------ */
 
+/* kanaha-books.json:
+ *   {"books": {"<name>": {"spoken_as": [...], "assets": [...],
+ *              "weights_percent": [...], "source_file": "...",
+ *              "window_years": N}, ...}}
+ * One bad book fails the whole load, so a typo shows at startup rather than
+ * as a book that silently cannot be named. */
 int kc_load_books(const char *path, kr_book_t *books, int max, char *err, int err_len)
 {
     json_object *root = json_object_from_file(path), *all;
@@ -287,6 +316,10 @@ int kc_load_books(const char *path, kr_book_t *books, int max, char *err, int er
     return n;
 }
 
+/* listCsvFiles returns {"files": [{"file": "...", "columns": [...]}, ...]}.
+ * Only <TICKER>_AdjClose columns are kept, as the ticker: that is the one
+ * column covarianceFromCsv is asked for. A file entry with no name is
+ * skipped. */
 int kc_fetch_catalog(axis2_h2_json_client_t *client, const axutil_env_t *env,
                      kr_file_t *files, int max, char *err, int err_len)
 {

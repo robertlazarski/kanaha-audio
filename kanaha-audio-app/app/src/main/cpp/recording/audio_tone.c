@@ -7,7 +7,13 @@
  *
  * Generates and plays sine wave tones through the device speaker using
  * the AAudio C API. Used for multi-device synchronization — the audio
- * equivalent of a film slate/clapper.
+ * equivalent of a film slate/clapper — and for the voice loop's cues.
+ * audio_tone_play_file plays a WAV the same way; flite's speech goes
+ * through it.
+ *
+ * Both output streams go through the Android mixer as MEDIA, so screen and
+ * audio capture (scrcpy, and from there Teams) hears them. See the note at
+ * the tone stream's builder.
  *
  * Supports start_at scheduling via clock_nanosleep(CLOCK_REALTIME,
  * TIMER_ABSTIME) for kernel-level precision. This is more precise than
@@ -154,9 +160,9 @@ static void *tone_thread_func(void *arg) {
      *   - 44100 Hz: standard audio quality for speaker output
      *   - Mono: single channel (tone sync doesn't need stereo)
      *   - PCM_I16: matches recording format
-     *   - Low latency: minimizes onset delay for sync precision
-     *   - state lives on this thread's stack, safe because we join
-     *     (via nanosleep + stop) before returning */
+     *   - Performance mode NONE, usage MEDIA: see the comment below
+     *   - state lives on this thread's stack, safe because the stream is
+     *     stopped and closed (after sleeping out the tone) before returning */
     AAudioStreamBuilder_setDirection(builder, AAUDIO_DIRECTION_OUTPUT);
     AAudioStreamBuilder_setSampleRate(builder, TONE_SAMPLE_RATE);
     AAudioStreamBuilder_setChannelCount(builder, 1);
@@ -294,6 +300,12 @@ static aaudio_data_callback_result_t wav_data_callback(
 }
 #endif
 
+/* Unlike audio_tone_play this blocks: it loads the whole file (bounded by
+ * AUDIO_PLAY_MAX_BYTES), mixes stereo to mono, plays it on this thread and
+ * returns once it has been heard. The header is taken as the canonical
+ * 44 bytes -- channels, rate and bits read from their fixed offsets -- as
+ * this app's recorder writes it; a WAV with extra chunks before "data"
+ * would play its chunk headers as a click. */
 int audio_tone_play_file(const char *wav_path) {
     if (!wav_path || strstr(wav_path, "..") || strlen(wav_path) == 0) {
         LOGE("Invalid path");

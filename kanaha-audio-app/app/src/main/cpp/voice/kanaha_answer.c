@@ -1,6 +1,17 @@
 /*
  * Kanaha Audio - answers to resolved requests
  * Licensed under the Apache License, Version 2.0
+ *
+ * See kanaha_answer.h for the three lines this writes. ka_answer() at the
+ * bottom is the whole job; everything above it is a small formatter:
+ *
+ *   cat, word      appending and counting words (as in the resolver)
+ *   money          331846.4 -> "331,846"
+ *   duration       the calculation's time, in the unit it lands in
+ *   subject        "the book" or "those five names", and singular or plural
+ *   regime_clause  ", every correlation at 0.80: a hypothetical regime"
+ *   fit_say        the spoken line cut to KA_SAY_MAX at a clause boundary
+ *   trace_line     the SPEC | line
  */
 
 #include "kanaha_answer.h"
@@ -10,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 
+/* printf onto the end of buf; stops quietly when buf is full. */
 static void cat(char *buf, int len, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
 static void cat(char *buf, int len, const char *fmt, ...)
 {
@@ -21,6 +33,7 @@ static void cat(char *buf, int len, const char *fmt, ...)
     va_end(ap);
 }
 
+/* 0-10 as a word; "" outside that, so a caller never prints a stray digit. */
 static const char *word(int n, int capital)
 {
     static const char *W[] = { "zero", "one", "two", "three", "four", "five", "six",
@@ -30,7 +43,8 @@ static const char *word(int n, int capital)
     return (n >= 0 && n <= 10) ? (capital ? C[n] : W[n]) : "";
 }
 
-/* "331,846" */
+/* "331,846": whole units, thousands separated. `lead` is the length of the
+ * first group (1-3 digits); a comma goes before every third digit after it. */
 static void money(double v, char *buf, int len)
 {
     char digits[32];
@@ -47,7 +61,8 @@ static void money(double v, char *buf, int len)
 }
 
 /* The calculation's own time, in the units it lands in: "One microsecond",
- * "153 microseconds", "392 milliseconds". Never rounded up for effect. */
+ * "153 microseconds", "392 milliseconds". Never rounded up for effect.
+ * It starts a sentence in the answer, hence the capital on the word form. */
 static void duration(long us, char *buf, int len)
 {
     if (us < 1) us = 1;
@@ -64,6 +79,7 @@ static void duration(long us, char *buf, int len)
     }
 }
 
+/* sum of w_i * vol_i. In a hypothetical regime every vol is the one said. */
 double ka_weighted_vol(const kr_spec_t *sp, const kc_result_t *r)
 {
     double w = 0;
@@ -73,7 +89,8 @@ double ka_weighted_vol(const kr_spec_t *sp, const kc_result_t *r)
     return w;
 }
 
-/* "The book" / "those five names", and whether the verb takes an s. */
+/* "The book" / "those five names", and whether the verb takes an s. The
+ * names form uses one static buffer, so use the result before calling again. */
 static const char *subject(const kr_spec_t *sp, int capital, int *plural)
 {
     static char buf[48];
@@ -87,6 +104,7 @@ static const char *subject(const kr_spec_t *sp, int capital, int *plural)
     return buf;
 }
 
+/* Appended to the written answer after the subject; nothing for historical. */
 static void regime_clause(const kr_spec_t *sp, char *buf, int len)
 {
     if (sp->regime == KR_REGIME_STRESSED)
@@ -96,7 +114,9 @@ static void regime_clause(const kr_spec_t *sp, char *buf, int len)
                       "hypothetical regime, no file", sp->vol * 100.0, sp->rho);
 }
 
-/* Cut to the last whole sentence or clause that fits, never mid-word. */
+/* Cut to the last whole sentence or clause that fits, never mid-word: the
+ * last '.' or ',' within the limit becomes the full stop. With neither, a
+ * hard cut. */
 static void fit_say(char *say, int say_len)
 {
     int max = say_len - 1 < KA_SAY_MAX ? say_len - 1 : KA_SAY_MAX;
@@ -107,6 +127,11 @@ static void fit_say(char *say, int say_len)
     say[max] = '\0';
 }
 
+/* "SPEC | book=demo5 | assets=... | weights=20,20,20,20,20 | source=... "
+ * kanaha-spec-replay.py splits it on '|' into key=value fields and needs
+ * assets, weights (in percent), source and tools; it re-runs the file's
+ * matrix and compares sigma_trace and vol. Rename a key and the replay
+ * breaks. A matrix with no file (source=-) is logged but not replayable. */
 static void trace_line(const kr_spec_t *sp, const kc_result_t *r, char *t, int len)
 {
     int i;
@@ -135,6 +160,11 @@ static void trace_line(const kr_spec_t *sp, const kc_result_t *r, char *t, int l
     cat(t, len, " | sigma_trace=%.4f | vol=%.4f", r->sigma_trace, r->volatility);
 }
 
+/* In order: a failure is said as it came; otherwise the written answer opens
+ * with the resolver's description (subject, weights, file), then the regime
+ * and dates; then the implausibility check; then one of two branches --
+ * variance or simulation -- each writing its numbers into the answer and
+ * one sentence per regime into say. */
 void ka_answer(const kr_spec_t *sp, const kc_result_t *r,
                char *answer, int answer_len, char *say, int say_len,
                char *trace, int trace_len)
@@ -197,6 +227,9 @@ void ka_answer(const kr_spec_t *sp, const kc_result_t *r,
                      plural ? "" : "s", r->volatility * 100.0, sp->vol * 100.0);
         }
     } else {
+        /* A simulation. The spoken line carries the 99 percent VaR only --
+         * the one number a room can hold -- and leaves the rest to the
+         * written answer. */
         money(r->var_99, v99, sizeof(v99));
         money(r->var_95, v95, sizeof(v95));
         money(r->cvar_95, cv, sizeof(cv));

@@ -5,6 +5,27 @@
  * A port of kanaha-voice-loop.py's calculation path. The rules carried over
  * are the ones that were learned by speaking to it; each is commented where
  * it lives.
+ *
+ * Map of the file, top to bottom:
+ *
+ *   state        status counters, the history ring, the event ring
+ *   vocabulary   KEYWORDS (what the trigger search listens for), CANCELS,
+ *                and the cue tones
+ *   clips        clip_path, discard, rec_start/stop, join_clips
+ *   text         transcribe, clean, cancelled, strip_triggers
+ *   trigger_in   the keyword search on one clip: the action, -1, or -2
+ *   window       OPEN tone, record spec_secs, WORKING tone, transcribe
+ *   handle_*     what a phrase does: an action (camera, switch) or a
+ *                request (dictation, the voice path, follow-up answers)
+ *   loop_main    the listening thread
+ *   autostart    starting the loop when httpd loads this module
+ *   public API   start, stop, active, status
+ *
+ * Two threads touch the statics: the loop thread and the HTTP handlers that
+ * read the status. s_lock guards the state, the strings and the rings. The
+ * counters are bumped by the loop thread without it, so a status read may
+ * be one behind. s_cfg and the clip names belong to the loop thread alone
+ * once it is running.
  */
 
 #include "kanaha_voice_loop.h"
@@ -35,16 +56,18 @@
 #define LOGE(...) (fprintf(stderr, __VA_ARGS__), fputc('\n', stderr))
 #endif
 
-#define SAMPLE_RATE      16000
-#define N_CLIPS          4
-#define MAX_FOLLOW_UPS   2
-#define THIN_CHARS       25
+#define SAMPLE_RATE      16000      /* what whisper wants */
+#define N_CLIPS          4          /* trigger clip names in rotation */
+#define MAX_FOLLOW_UPS   2          /* questions answered per request */
+#define THIN_CHARS       25         /* a dictation shorter than this may be cut */
 
+/* STARTING covers the model load; STOPPING the step in progress when a stop
+ * was asked for. Only STOPPED lets a new loop start. */
 typedef enum { ST_STOPPED, ST_STARTING, ST_RUNNING, ST_STOPPING } state_t;
 
 static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
 static state_t s_state = ST_STOPPED;
-static volatile int s_stop;
+static volatile int s_stop;         /* set by stop(); every wait checks it */
 static kvl_config_t s_cfg;
 static char s_model[32];
 static long s_clips, s_triggers, s_requests;
@@ -69,6 +92,10 @@ static long s_ev_seq;
  * (its events numbered from 1 again) from one it has already heard from. */
 static long s_session;
 
+/* The phrases that open a dictation window. They are also cut out of the
+ * transcript (strip_triggers) so the resolver never sees them. Their index
+ * is their action number in KEYWORDS below; every action from N_TRIGGERS up
+ * acts by itself. */
 static const char *TRIGGERS[] = { "calculate", "run it", "stress it", "simulate it" };
 #define N_TRIGGERS 4
 
@@ -190,6 +217,7 @@ static void discard(const char *clip)
     unlink(path);
 }
 
+/* The recorder, at 16 kHz, starting now. A failure is kept for the status. */
 static int rec_start(const char *clip)
 {
     if (audio_recording_start(clip, SAMPLE_RATE, 0) != 0) {
@@ -200,6 +228,7 @@ static int rec_start(const char *clip)
     return 0;
 }
 
+/* Stop whatever is recording; harmless when nothing is. */
 static void rec_stop(void)
 {
     int64_t dur = 0, size = 0;
@@ -208,7 +237,9 @@ static void rec_stop(void)
 }
 
 /* Whisper narrates what it could not transcribe ("[BLANK_AUDIO]", "(beep)")
- * and marks speaker changes (">>"). None of it is speech. */
+ * and marks speaker changes (">>"). None of it is speech. Bracketed text is
+ * dropped (nesting counted), runs of whitespace become one space, and the
+ * ends are trimmed; the result is written back into s. */
 static void clean(char *s)
 {
     char out[1024];
@@ -227,6 +258,7 @@ static void clean(char *s)
     memcpy(s, out, (size_t)o + 1);
 }
 
+/* Full transcription of one clip (no keyword list), cleaned; "" on failure. */
 static void transcribe(const char *clip, char *out, size_t len)
 {
     char path[640];
@@ -241,6 +273,10 @@ static void transcribe(const char *clip, char *out, size_t len)
     free(r.text);
 }
 
+/* Does `text` contain `phrase` as whole words, ignoring case and , . ! ?
+ * The text is lower-cased with punctuation turned to spaces and padded with
+ * a space at each end, so " never mind " matches "Never mind." but "cancel"
+ * does not match "cancellation". */
 static int lower_contains_word(const char *text, const char *phrase)
 {
     char low[1100];
@@ -259,6 +295,7 @@ static int lower_contains_word(const char *text, const char *phrase)
     }
 }
 
+/* The cancel phrase in text, or NULL. */
 static const char *cancelled(const char *text)
 {
     int i;
@@ -268,7 +305,9 @@ static const char *cancelled(const char *text)
     return NULL;
 }
 
-/* Remove the trigger words, so the resolver sees the request, not the cue. */
+/* Remove the trigger words, so the resolver sees the request, not the cue.
+ * The first occurrence of each trigger is cut, case-insensitively, as a
+ * substring -- not a whole-word match like lower_contains_word(). */
 static void strip_triggers(char *text)
 {
     int i;
@@ -289,6 +328,10 @@ static void strip_triggers(char *text)
     while (*text && strchr(" ,;:", text[strlen(text) - 1])) text[strlen(text) - 1] = '\0';
 }
 
+/* Search one clip for every KEYWORDS phrase. The action of the first match
+ * at or above min_confidence; -1 for none; -2 when the search itself failed.
+ * whisper_bridge_search_keywords matches exact consecutive words, so the
+ * alternative spellings in KEYWORDS are what give it any slack. */
 static int trigger_in(const char *clip)
 {
     char path[640];
@@ -391,6 +434,8 @@ static void window(const char *clip, char *text, size_t len)
     transcribe(clip, text, len);
 }
 
+/* Record one outcome in the status and the history ring (the oldest entry
+ * is overwritten once HISTORY are held). */
 static void remember_said(const char *heard, const char *outcome, const char *said)
 {
     entry_t *e;
@@ -415,6 +460,8 @@ static void remember(const char *heard, const char *outcome)
     remember_said(heard, outcome, NULL);
 }
 
+/* Add an event with the next seq. A poller that falls more than EVENTS
+ * behind loses the oldest; for one switch per demo that cannot happen. */
 static void post_event(const char *what)
 {
     event_t *e;
@@ -456,7 +503,14 @@ static void handle_action(int kw)
 }
 
 /* The request after a trigger in `trigger_clip`; `bridge_clip` was recording
- * when the trigger was found and holds whatever followed the word. */
+ * when the trigger was found and holds whatever followed the word.
+ *
+ *   1. dictation window -> text
+ *   2. cancel? drop it
+ *   3. thin and unpunctuated? prepend the trigger and bridge clips' text
+ *   4. strip the trigger words; cancel or nothing left? drop it
+ *   5. up to 1 + MAX_FOLLOW_UPS turns: send to the voice path; on ASK open
+ *      an answer window and go round again, otherwise stop */
 static void handle_request(const char *trigger_clip, const char *bridge_clip)
 {
     /* The voice path's reply is about 2.6 KB at most (read-back 400, answer
@@ -569,6 +623,17 @@ static void handle_request(const char *trigger_clip, const char *bridge_clip)
     }
 }
 
+/*
+ * The listening thread. Trigger clips rotate through CLIPS: one is always
+ * recording (CLIPS[ci]), the one that just closed is searched, and the one
+ * before that (`prev`) is searched with it as a pair, then deleted. Four
+ * names keep the recorder from reopening a clip still in use.
+ *
+ * On a phrase: the pair is forgotten (so it cannot fire again from the
+ * next pair), the cooldown is checked, the phrase is handled with the
+ * microphone stopped, every clip it used is deleted, and recording resumes
+ * on a fresh name.
+ */
 static void *loop_main(void *arg)
 {
     static const char *CLIPS[N_CLIPS] = { "vl_0", "vl_1", "vl_2", "vl_3" };
@@ -740,6 +805,8 @@ static void *autostart_main(void *arg)
     return NULL;
 }
 
+/* Runs when httpd loads this module. It only spawns the thread: a
+ * constructor must not block the load, and httpd is not serving yet. */
 __attribute__((constructor))
 static void autostart_at_load(void)
 {
@@ -751,6 +818,10 @@ static void autostart_at_load(void)
     pthread_attr_destroy(&attr);
 }
 
+/* Refused while a loop exists or the microphone is busy. Otherwise the
+ * config is copied with its defaults, the counters, events and a new session
+ * id are reset, and the thread is started; the model loads on that thread,
+ * so a bad model shows as STOPPED with last_error, not as an error here. */
 int kanaha_voice_loop_start(const kvl_config_t *cfg, char *err, int err_len)
 {
     pthread_t t;
@@ -818,6 +889,8 @@ int kanaha_voice_loop_active(void)
     return a;
 }
 
+/* History and events are written oldest first: the rings are unrolled from
+ * (next - n), wrapping. */
 void kanaha_voice_loop_status(char *out, size_t size)
 {
     static const char *NAMES[] = { "stopped", "starting", "running", "stopping" };
