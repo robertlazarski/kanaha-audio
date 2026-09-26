@@ -32,6 +32,8 @@
 # Scripts that act on one kind should pass --kind: a phone can run several
 # apps, so without it one IP can appear more than once.
 
+# No -e, on purpose: timeout exits 124 when avahi-browse finds nothing, and
+# with -e and pipefail the script would die there instead of port scanning.
 set -uo pipefail
 
 CERT_DIR="${KANAHA_CERT_DIR:-${KANAHA_SSL_DIR:-$HOME/kanaha-ca}}"
