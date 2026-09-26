@@ -520,6 +520,14 @@ static void handle_request(const char *trigger_clip, const char *bridge_clip)
             outcome = "ERROR";
         }
         LOGI("[request] '%s' -> %s", text, outcome);
+        /* A request that got through proves the calcs phone is reachable
+         * again, so a start-up complaint that it was not is stale now. */
+        if (strcmp(outcome, "ERROR") != 0) {
+            pthread_mutex_lock(&s_lock);
+            if (strncmp(s_last_error, "autostart:", 10) == 0)
+                s_last_error[0] = '\0';
+            pthread_mutex_unlock(&s_lock);
+        }
         {
             /* What the room heard: the answer's SAY line, or the question,
              * refusal or read-back when there was no answer. */
