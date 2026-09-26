@@ -300,11 +300,12 @@ static int trigger_in(const char *clip)
     for (i = 0; i < N_KEYWORDS; i++)
         phrases[i] = KEYWORDS[i].phrase;
     if (whisper_bridge_search_keywords(path, phrases, N_KEYWORDS, TRIGGER_PROMPT, &r) != 0) {
-        /* A failed search must not look like a quiet room. */
+        /* A failed search must not look like a quiet room: it is recorded
+         * here, and the loop says so aloud if it keeps happening. */
         pthread_mutex_lock(&s_lock);
         snprintf(s_last_error, sizeof(s_last_error), "keyword search failed on %s", path);
         pthread_mutex_unlock(&s_lock);
-        return -1;
+        return -2;
     }
     for (i = 0; i < r.num_matches; i++) {
         for (j = 0; j < N_KEYWORDS; j++) {
@@ -458,7 +459,10 @@ static void handle_action(int kw)
  * when the trigger was found and holds whatever followed the word. */
 static void handle_request(const char *trigger_clip, const char *bridge_clip)
 {
-    char text[1024], extra[1024], json[4096];
+    /* The voice path's reply is about 2.6 KB at most (read-back 400, answer
+     * 768, say 400, trace 768, plus names); room to spare, because a reply
+     * cut short parses as an error and plays the nothing-heard tone. */
+    char text[1024], extra[1024], json[16384];
     const char *c;
     int turn;
 
@@ -563,6 +567,7 @@ static void *loop_main(void *arg)
     int ci = 0;
     double last_request = -1e9;
     const char *prev = NULL;     /* the clip before `just`, searched with it */
+    int failed_searches = 0;     /* in a row; a deaf loop must say it is deaf */
     (void)arg;
 
     if (whisper_bridge_load_model(s_model) != 0) {
@@ -602,6 +607,17 @@ static void *loop_main(void *arg)
             discard("vl_pair");
         } else {
             hit = trigger_in(just);
+        }
+        if (hit == -2) {
+            /* Three failures in a row is a listener that cannot hear -- a bad
+             * model, say. Nobody watches the status on stage, so it is said
+             * once, aloud, until a search works again. */
+            if (++failed_searches == 3) {
+                LOGE("keyword search keeps failing; saying so");
+                kanaha_voice_say("I can't hear the commands. Restart Kanaha Audio.");
+            }
+        } else {
+            failed_searches = 0;
         }
         if (hit < 0) {
             if (prev)
