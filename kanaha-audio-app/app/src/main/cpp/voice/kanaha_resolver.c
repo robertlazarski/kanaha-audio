@@ -11,6 +11,32 @@
  *
  * Every refusal and question is a sentence someone reads aloud, so each one
  * says what would work instead.
+ *
+ * READING GUIDE
+ *
+ * Start at kr_resolve() at the bottom; it calls everything else. Data moves
+ * through three structures, one per step:
+ *
+ *   toks_t    the transcript as words, numbers and '%' signs
+ *   feat_t    what those tokens say, slot by slot, with no judgement yet:
+ *             "an operation word was heard", "a correlation of 0.8 was heard"
+ *   kr_spec_t the request as it will run -- assembled from the features,
+ *             checked, and filled with defaults by complete()
+ *
+ * One transcript, followed through:
+ *
+ *   "Same book at correlation.8, forward"
+ *     tokenise  -> same | book | at | correlation | .8 | forward
+ *     features  -> op SIMULATE ("forward"), the book ("book", with one book
+ *                  defined), rho 0.8
+ *     spec      -> the book's names, regime STRESSED (a correlation, no vol)
+ *     complete  -> equal weights, the book's own file and window -> KR_RUN,
+ *                  and a read-back that names the tickers, the file, the
+ *                  correlation and the simulation before anything runs
+ *
+ * A turn that cannot run asks one question and parks the half-built spec in
+ * the session (kr_session_t). The next turn is read first as the answer to
+ * that question; see "A pending question" in kr_resolve().
  */
 
 #include "kanaha_resolver.h"
@@ -32,13 +58,17 @@
 /* tokens                                                                    */
 /* ------------------------------------------------------------------------ */
 
+/* A token is a lower-case word ("correlation"), a written number ("0.8",
+ * "22", "-0.3") or a percent sign. Spoken numbers ("point eight") stay words
+ * here; read_number() turns word sequences into values later. */
 typedef enum { T_WORD, T_NUM, T_PCT } tok_type_t;
 
 typedef struct {
     tok_type_t type;
     char text[TOK_LEN];
     double value;       /* T_NUM */
-    int decimals;       /* T_NUM: digits after the point */
+    int decimals;       /* T_NUM: digits after the point -- "0.857" is 3, which
+                         * is how the two-decimal rule is enforced */
 } tok_t;
 
 typedef struct {
@@ -46,6 +76,8 @@ typedef struct {
     int n;
 } toks_t;
 
+/* Append one token; overlong input is cut at TOK_LEN, extra tokens past
+ * MAX_TOKENS are dropped (a transcript is a sentence or two). */
 static void push(toks_t *ts, tok_type_t type, const char *s, int len)
 {
     tok_t *k;
@@ -78,6 +110,14 @@ static void push(toks_t *ts, tok_type_t type, const char *s, int len)
  *    company and whisper picks either spelling.
  *  - A '-' directly before a digit is a sign; anywhere else it separates
  *    ("twenty-two", "co-variance").
+ *
+ * Two passes. The first rewrites the text into `buf` character by character,
+ * applying the rules above, so that afterwards words, numbers and '%' are
+ * separated by spaces. The second walks `buf` and cuts it into tokens:
+ *
+ *   "Johnson & Johnson, J.P. Morgan at correlation.8"
+ *   buf:  "johnson  and  johnson  jp morgan at correlation .8"
+ *   tokens: johnson | and | johnson | jp | morgan | at | correlation | .8
  */
 static void tokenise(const char *in, toks_t *ts)
 {
@@ -86,6 +126,8 @@ static void tokenise(const char *in, toks_t *ts)
     size_t len = strlen(in);
 
     ts->n = 0;
+    /* Pass 1: normalise into buf. Each branch handles one kind of character
+     * and `continue`s; anything unrecognised becomes a space. */
     for (i = 0; i < (int)len && n < (int)sizeof(buf) - 8; i++) {
         char c = in[i];
         if (c == '[') {
@@ -128,6 +170,9 @@ static void tokenise(const char *in, toks_t *ts)
     }
     buf[n] = '\0';
 
+    /* Pass 2: cut buf into tokens. A run of letters is a word; a run of
+     * digits (with at most one '.', and an optional leading '-') is a number;
+     * '%' is its own token. A lone '-' or '.' is skipped. */
     for (i = 0; i < n;) {
         int j = i;
         if (buf[i] == ' ') { i++; continue; }
@@ -156,6 +201,20 @@ static void tokenise(const char *in, toks_t *ts)
     }
 }
 
+/* ---- matching helpers ----
+ *
+ * Word lists are written "a|b|c", one string, so a whole family of spoken
+ * forms reads as one line at the call site:
+ *
+ *   is_w(ts, i, "variance|variants|variates")   token i is one of these
+ *   find_w(ts, "book|books|port")               first token that is, or -1
+ *   match_phrase(ts, i, "johnson and johnson")  tokens i.. spell the phrase
+ *
+ * is_w() is safe for any i, including negative or past the end (it answers
+ * 0), which the window parser relies on when it looks one or two tokens
+ * behind "years". */
+
+/* Is token i a word, and one of the '|'-separated `words`? */
 static int is_w(const toks_t *ts, int i, const char *words)
 {
     const char *p = words;
@@ -174,6 +233,7 @@ static int is_w(const toks_t *ts, int i, const char *words)
     return 0;
 }
 
+/* The first token that is one of `words`, or -1. */
 static int find_w(const toks_t *ts, const char *words)
 {
     int i;
@@ -183,7 +243,8 @@ static int find_w(const toks_t *ts, const char *words)
     return -1;
 }
 
-/* Does the token sequence at i spell `phrase` (space-separated words)? */
+/* Does the token sequence at i spell `phrase` (space-separated words)? On a
+ * match *ntok is how many tokens it used, so a caller can step past them. */
 static int match_phrase(const toks_t *ts, int i, const char *phrase, int *ntok)
 {
     char w[TOK_LEN];
@@ -208,12 +269,17 @@ static int match_phrase(const toks_t *ts, int i, const char *phrase, int *ntok)
 /* numbers, spoken or written                                                */
 /* ------------------------------------------------------------------------ */
 
+/* Whisper writes numbers either way -- "0.8" one time, "point eight" the
+ * next -- so both are read. Word numbers cover what a person says in this
+ * demo: 0-99, "a hundred", and decimals digit by digit ("point eight five").
+ * "oh" counts as zero ("point oh five"). */
 static const char *UNITS[] = { "zero", "one", "two", "three", "four", "five", "six",
     "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
     "fifteen", "sixteen", "seventeen", "eighteen", "nineteen" };
 static const char *TENS[] = { "", "", "twenty", "thirty", "forty", "fifty", "sixty",
     "seventy", "eighty", "ninety" };
 
+/* 0-19 for a unit or teen word, else -1. */
 static int word_unit(const tok_t *k)
 {
     int u;
@@ -224,6 +290,7 @@ static int word_unit(const tok_t *k)
     return -1;
 }
 
+/* 20, 30 ... 90 for a tens word, else -1. */
 static int word_tens(const tok_t *k)
 {
     int t;
@@ -234,15 +301,22 @@ static int word_tens(const tok_t *k)
 }
 
 typedef struct {
-    int ok;
+    int ok;                 /* 0: no number starts here */
     double value;
-    int decimals;
-    int ntok;
+    int decimals;           /* digits after the point, spoken or written */
+    int ntok;               /* tokens it used: "twenty two" is 2, "0.8" is 1 */
     char text[TOK_LEN];     /* as it will be quoted back */
 } num_t;
 
 /* A number starting at token i: "0.8", ".8", "-0.3", "twenty two",
- * "point eight five", "zero point eight", "minus point three", "a hundred". */
+ * "point eight five", "zero point eight", "minus point three", "a hundred".
+ *
+ * Read left to right: an optional "minus", then a whole part (tens + unit,
+ * a unit or teen, or "hundred"), then an optional "point" and its digits.
+ * "twenty fifteen" reads as 20 and stops -- fifteen is not a unit digit --
+ * which is what lets weights "twenty five twenty five twenty fifteen fifteen"
+ * come out as 25, 25, 20, 15, 15. "point" with no digit after it is not a
+ * number: "correlation point." (clipped) must not become 0. */
 static num_t read_number(const toks_t *ts, int i)
 {
     num_t r;
@@ -307,7 +381,10 @@ static num_t read_number(const toks_t *ts, int i)
 }
 
 /* The number after keyword position `kw`, allowing a few filler words in
- * between ("correlation at 0.8", "every correlation set to point eight"). */
+ * between ("correlation at 0.8", "every correlation set to point eight").
+ * At most four fillers are skipped, so a number far down the sentence is not
+ * pulled back to an unrelated keyword. *pct_follows says whether a '%' or
+ * "percent" came straight after the number. */
 static num_t number_after(const toks_t *ts, int kw, int *pct_follows)
 {
     static const char *FILLER = "at|of|to|is|are|set|be|all|every|each|equal|equals|the|a|"
@@ -330,6 +407,12 @@ static num_t number_after(const toks_t *ts, int kw, int *pct_follows)
 /* features                                                                  */
 /* ------------------------------------------------------------------------ */
 
+/* Company names as whisper writes them, after tokenise(): "J.P. Morgan" has
+ * already become "jp morgan" and "&" has become "and". Several phrases map to
+ * one ticker. Within a company the longer phrase comes first, because the
+ * scan takes the first match at a position and steps past it: "amazon dot
+ * com" must win over "amazon" so the whole name is consumed. "morgan" alone
+ * is absent: "Morgan Stanley" would match it too. */
 static const struct { const char *phrase; const char *ticker; } NAMES[] = {
     { "johnson and johnson", "JNJ" }, { "j and j", "JNJ" }, { "jnj", "JNJ" },
     { "j p morgan", "JPM" }, { "jp morgan", "JPM" }, { "jpmorgan", "JPM" },
@@ -341,33 +424,40 @@ static const struct { const char *phrase; const char *ticker; } NAMES[] = {
 };
 #define N_NAMES ((int)(sizeof(NAMES) / sizeof(NAMES[0])))
 
+/* What one transcript said, slot by slot. Each field records only what was
+ * heard; whether the combination makes sense is decided later, in
+ * kr_resolve() and complete(). A field left 0 means "not said". */
 typedef struct {
-    int empty;
-    kr_op_t op;
-    int refuse;
+    int empty;          /* no tokens at all: a blank clip */
+    kr_op_t op;         /* a verb was heard: variance or simulate */
+    int refuse;         /* something heard must not run; refusal says why */
     char refusal[KR_SAY_LEN];
 
-    const kr_book_t *book;
-    int book_ambiguous;
-    int n_names;
+    const kr_book_t *book;      /* a book, by a spoken form or by "book" */
+    int book_ambiguous;         /* "book" with several books defined */
+    int n_names;                /* tickers from NAMES, in the order said */
     char names[KR_MAX_ASSETS][KR_TICKER_LEN];
     int too_many_names;
-    int yes;
+    int yes;                    /* an answer to "on the book, or other names?" */
 
     int have_rho;
     double rho;
     int have_vol;
     double vol;         /* fraction */
 
-    int n_weights;
-    double weights_pct[KR_MAX_ASSETS + 1];
+    int n_weights;      /* 0 unless at least two were heard */
+    double weights_pct[KR_MAX_ASSETS + 1];  /* one spare, to notice too many */
 
-    int window_years;   /* -1 = not said */
+    int window_years;   /* -1 = not said; 0 = the whole file */
     int window_months;
 
     int file_word[KR_MAX_FILES];    /* the utterance names file i */
 } feat_t;
 
+/* Record a refusal. Only the first one counts: it is the one said aloud, and
+ * checks run in order of importance (a covariance by voice before a
+ * mistyped correlation). `fmt` always takes two %s, filled from a and b; pass
+ * NULL for an unused one. */
 static void refuse(feat_t *f, const char *fmt, const char *a, const char *b)
 {
     if (f->refuse)
@@ -376,6 +466,7 @@ static void refuse(feat_t *f, const char *fmt, const char *a, const char *b)
     snprintf(f->refusal, sizeof(f->refusal), fmt, a ? a : "", b ? b : "");
 }
 
+/* "three" for 3, for sentences like "a correlation of 0.857, three decimals". */
 static int decimals_word(int d, char *buf, int len)
 {
     static const char *W[] = { "no", "one", "two", "three", "four", "five", "six" };
@@ -383,8 +474,10 @@ static int decimals_word(int d, char *buf, int len)
     return d;
 }
 
-/* The distinctive words of each file's name: "fis" for fis_daily_closes.csv
- * against wiki_daily_closes_10yr.csv. */
+/* The words of a file's name, lower-cased, split on '_', '.', '-' and space,
+ * without "csv": fis_daily_closes.csv -> fis, daily, closes. The caller
+ * compares these across files to find each file's distinctive words -- "fis"
+ * for fis_daily_closes.csv against wiki_daily_closes_10yr.csv. */
 static void file_words(const kr_file_t *f, char words[8][TOK_LEN], int *n)
 {
     char tmp[KR_NAME_LEN];
@@ -399,6 +492,18 @@ static void file_words(const kr_file_t *f, char words[8][TOK_LEN], int *n)
     }
 }
 
+/*
+ * Fill `f` from the tokens. Each block below reads one slot and is
+ * independent of the others, except where noted; the order matters only for
+ * refusals, since the first one recorded is the one said:
+ *
+ *   covariance refusal  -- first, so it wins over anything else heard
+ *   operation           -- simulate beats variance wherever it appears
+ *   correlation, vol    -- the first keyword with a number after it
+ *   names, book, yes
+ *   weights, window
+ *   files               -- by the words that tell one file from another
+ */
 static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
 {
     int i, pct;
@@ -409,7 +514,9 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
     f->window_years = -1;
     f->empty = (ts->n == 0);
 
-    /* Covariances are never taken from speech, one cell or a whole matrix. */
+    /* Covariances are never taken from speech, one cell or a whole matrix.
+     * Three spellings: "covariance", "co variance" (from "co-variance"), and
+     * "variance between X and Y", which is a covariance by another name. */
     if (find_w(ts, "covariance|covariances") >= 0 ||
         (find_w(ts, "co") >= 0 && find_w(ts, "variance|variances") == find_w(ts, "co") + 1) ||
         (find_w(ts, "variance") >= 0 && is_w(ts, find_w(ts, "variance") + 1, "between")))
@@ -417,7 +524,12 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
                   "Give me the volatilities and one correlation, or name the file and "
                   "I will build it from the data.%s%s", NULL, NULL);
 
-    /* Operation. A vol word followed by a number is a regime, not a verb. */
+    /* Operation. A simulation word anywhere makes it a simulation, even after
+     * a variance word ("the variance ... simulated forward"), because a
+     * simulation is the bigger request and says more. Variance is taken only
+     * while nothing else has been. "variants", "variates" and friends are
+     * whisper's spellings of "variance". A vol word followed by a number is a
+     * regime ("vol at 22"), not a verb, so it is left to the vol block. */
     for (i = 0; i < ts->n; i++) {
         if (is_w(ts, i, "simulate|simulation|simulated|simulating|forward|ahead|monte") ||
             (is_w(ts, i, "value") && is_w(ts, i + 1, "at") && is_w(ts, i + 2, "risk")))
@@ -428,7 +540,9 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
             f->op = KR_OP_VARIANCE;
     }
 
-    /* Correlation. */
+    /* Correlation: the first correlation word with a number after it. A value
+     * that breaks a rule is still recorded, with a refusal, so the refusal is
+     * what gets said. */
     for (i = 0; i < ts->n; i++) {
         if (!is_w(ts, i, "correlation|correlations|correlated|correlate|rho"))
             continue;
@@ -471,7 +585,9 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
         break;
     }
 
-    /* Names, longest phrase first at each position. */
+    /* Names. At each position try NAMES in table order (longest phrase first)
+     * and step past the first match; otherwise step one token. A company said
+     * twice is kept once. */
     for (i = 0; i < ts->n;) {
         int j, used = 0;
         for (j = 0; j < N_NAMES; j++) {
@@ -492,7 +608,9 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
         i += used ? used : 1;
     }
 
-    /* A book, by one of its spoken forms, or "book" when only one exists. */
+    /* A book, by one of its spoken forms, or "book" when only one exists.
+     * A spoken form from kanaha-books.json is run through tokenise() too, so both sides are normalised the same way, then joined
+     * back into a phrase for match_phrase(). */
     for (i = 0; i < ctx->n_books && !f->book; i++) {
         int s, k, nt;
         for (s = 0; s < ctx->books[i].n_spoken && !f->book; s++) {
@@ -522,7 +640,11 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
     f->yes = find_w(ts, "yes|yeah|yep|correct|right") >= 0;
 
     /* Weights: "weights 25 25 20 15 15" -- at least two numbers, and not the
-     * start of a window ("equal weights 10 years"). */
+     * start of a window ("equal weights 10 years"). Numbers are read one
+     * after another from the weights word, each optionally followed by '%',
+     * "percent" or "and" ("25 percent, 25 percent and 20 ..."). The loop
+     * reads one past KR_MAX_ASSETS so that too many weights is visible as a
+     * count mismatch in complete() rather than silently cut. */
     i = find_w(ts, "weights|weight|weighted|weighting");
     if (i >= 0) {
         int k = i + 1, n = 0;
@@ -545,8 +667,18 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
             f->n_weights = n;
     }
 
-    /* Window. "N years" / "N months" / "last year" / "twelve months" / "all".
-     * "a year" straight after "forward" is a simulation horizon, not a window. */
+    /* Window. "N years" / "N months" / "last year" / "twelve months" /
+     * "the whole file". "a year" straight after "forward" is a simulation
+     * horizon, not a window: "simulate the book forward a year" must use the
+     * book's own window.
+     *
+     * The number sits before the unit, so the parse looks backwards from
+     * "years" at token i:
+     *   i-1  a written number ("10 years") or a one-word number ("ten years")
+     *   i-2  a two-word number ("twenty two months")
+     * `horizon` is set when "forward"/"ahead" is one or two tokens back
+     * ("forward a year", "forward one year"); the check on i-1-nr.ntok looks
+     * just before the number, however many tokens it took. */
     for (i = 0; i < ts->n; i++) {
         int horizon = is_w(ts, i - 1, "forward|ahead") || is_w(ts, i - 2, "forward|ahead");
         if (is_w(ts, i, "year|years|yr")) {
@@ -577,7 +709,10 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
             f->window_years = 0;
     }
 
-    /* Files, by their distinctive words. */
+    /* Files, by their distinctive words: a word of file i's name that no
+     * other file's name contains. "daily" and "closes" are in every name here
+     * and say nothing; "fis" or "wiki" picks one file. Several files can be
+     * marked -- kr_resolve() treats that as no hint at all. */
     for (i = 0; i < ctx->n_files; i++) {
         char w[8][TOK_LEN];
         int nw, a, b, c;
@@ -604,6 +739,9 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
 /* the spec                                                                  */
 /* ------------------------------------------------------------------------ */
 
+/* How a file is named aloud: its first name word, "the FIS file" (a word of
+ * three letters or fewer is read as an acronym and upper-cased), or the
+ * file name itself when it has no words. */
 void kr_file_spoken(const kr_file_t *f, char *buf, int len)
 {
     char w[8][TOK_LEN];
@@ -633,6 +771,8 @@ static int file_has(const kr_file_t *f, const char *ticker)
     return 0;
 }
 
+/* The subject is either a book (its tickers, and later its file and window)
+ * or loose names (a file is then found that carries them all). */
 static void set_subject_book(kr_spec_t *sp, const kr_book_t *b)
 {
     int i;
@@ -651,6 +791,8 @@ static void set_subject_names(kr_spec_t *sp, const feat_t *f)
         snprintf(sp->tickers[i], KR_TICKER_LEN, "%s", f->names[i]);
 }
 
+/* Sentences are built by appending to a KR_SAY_LEN buffer; cat() is a
+ * bounded printf-append, and silently stops when the buffer is full. */
 static void cat(char *buf, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 static void cat(char *buf, const char *fmt, ...)
 {
@@ -662,6 +804,7 @@ static void cat(char *buf, const char *fmt, ...)
     va_end(ap);
 }
 
+/* A count as a word, for "Five names", "ten years of ...". */
 static const char *count_word(int n, int capital)
 {
     static const char *W[] = { "zero", "one", "two", "three", "four", "five", "six",
@@ -672,7 +815,14 @@ static const char *count_word(int n, int capital)
     return capital ? C[n] : W[n];
 }
 
-/* "The book — MSFT, AAPL, AMZN, JPM, JNJ, equal weights" or
+/* The read-back is three pieces in this order, each appending to `buf`:
+ *   say_subject        who:   the book or the names, and the weights
+ *   say_data           from:  the window and the file (nothing if hypothetical)
+ *   say_regime_and_op  how:   any regime, then the operation
+ * A book is always expanded to its tickers, so a misheard "book" is heard
+ * as a list of names nobody asked for.
+ *
+ * "The book — MSFT, AAPL, AMZN, JPM, JNJ, equal weights" or
  * "Five names, MSFT, AAPL, ..., weights 25, 25, 20, 15, 15 percent". */
 static void say_subject(const kr_spec_t *sp, char *buf)
 {
@@ -693,6 +843,7 @@ static void say_subject(const kr_spec_t *sp, char *buf)
     }
 }
 
+/* ", ten years of the wiki file" / ", the last year of ..." / ", the whole of ..." */
 static void say_data(const kr_spec_t *sp, char *buf)
 {
     char fname[KR_NAME_LEN + 16];
@@ -709,6 +860,8 @@ static void say_data(const kr_spec_t *sp, char *buf)
         cat(buf, ", the whole of %s", fname);
 }
 
+/* Both non-historical regimes are called "a hypothetical regime" aloud: the
+ * room needs to hear that the numbers are not what the data says. */
 static void say_regime_and_op(const kr_spec_t *sp, char *buf)
 {
     if (sp->regime == KR_REGIME_STRESSED)
@@ -732,6 +885,8 @@ void kr_describe(const kr_spec_t *sp, char *buf, int len)
     snprintf(buf, (size_t)len, "%s", tmp);
 }
 
+/* End the turn with a question (out->say is already written) and park the
+ * draft in the session, noting which slot the answer should fill. */
 static void ask(kr_session_t *s, kr_result_t *out, const kr_spec_t *sp, kr_slot_t slot,
                 int have_subject)
 {
@@ -741,7 +896,16 @@ static void ask(kr_session_t *s, kr_result_t *out, const kr_spec_t *sp, kr_slot_
     s->have_subject = have_subject;
 }
 
-/* Finish a draft: validate, fill defaults, or stop at the first gap. */
+/* Finish a draft: validate, fill defaults, or stop at the first gap.
+ *
+ * Each numbered step either passes, asks (ask(): the draft is kept for the
+ * next turn), or refuses (kr_session_init(): the draft is dropped, since a
+ * refusal means "say it again", not "answer this"). The order is the order a
+ * person would be asked in -- who, what, then the details -- so only one
+ * question is ever asked per turn, and the most basic one first.
+ *
+ * file_hint is the one file the utterance named, or -1. file_hint_other says
+ * a book was named together with a file that is not the book's own. */
 static void complete(const kr_context_t *ctx, kr_session_t *s, kr_spec_t *sp,
                      int have_subject, int file_hint, int file_hint_other,
                      kr_result_t *out)
@@ -749,7 +913,8 @@ static void complete(const kr_context_t *ctx, kr_session_t *s, kr_spec_t *sp,
     int i;
     memset(out, 0, sizeof(*out));
 
-    /* 1. The subject. */
+    /* 1. The subject. With one book the question offers it by name, so "yes"
+     * is an answer (see KR_SLOT_SUBJECT in kr_resolve). */
     if (!have_subject) {
         if (ctx->n_books == 1) {
             snprintf(out->say, sizeof(out->say), "On the book \xe2\x80\x94 ");
@@ -777,7 +942,10 @@ static void complete(const kr_context_t *ctx, kr_session_t *s, kr_spec_t *sp,
         return;
     }
 
-    /* 2. The operation. A regime without a verb is a variance, by rule. */
+    /* 2. The operation. A regime without a verb is a variance, by rule:
+     * "the book at correlation point eight" is a what-if on the risk number.
+     * With neither, ask -- and read the subject back first, so a wrong
+     * subject is caught before the question is answered. */
     if (sp->op == KR_OP_NONE) {
         if (sp->regime != KR_REGIME_HISTORICAL) {
             sp->op = KR_OP_VARIANCE;
@@ -791,7 +959,8 @@ static void complete(const kr_context_t *ctx, kr_session_t *s, kr_spec_t *sp,
         }
     }
 
-    /* 3. A hypothetical regime needs its correlation. */
+    /* 3. A hypothetical regime needs its correlation. (A stressed regime
+     * only exists because a correlation was heard, so it never lacks one.) */
     if (sp->regime == KR_REGIME_HYPOTHETICAL && !sp->have_rho) {
         snprintf(out->say, sizeof(out->say), "Every vol at %g percent. And what correlation "
                  "between them?", sp->vol * 100.0);
@@ -799,7 +968,9 @@ static void complete(const kr_context_t *ctx, kr_session_t *s, kr_spec_t *sp,
         return;
     }
 
-    /* 4. Weights. */
+    /* 4. Weights. None said is equal weights. Said weights must be one per
+     * name and sum to 100 within one point; a sum off by less than that
+     * (say 99, from rounding) is normalised and the read-back says so. */
     sp->weights_normalized = 0;
     if (sp->n_weights_spoken == 0) {
         sp->weights_equal = 1;
@@ -826,7 +997,13 @@ static void complete(const kr_context_t *ctx, kr_session_t *s, kr_spec_t *sp,
         for (i = 0; i < sp->n_assets; i++) sp->weights[i] = sp->weights_pct[i] / sum;
     }
 
-    /* 5. The file. */
+    /* 5. The file. Three cases:
+     *   hypothetical  no file: the vols and correlation were said
+     *   a book        the book's own file, and its window unless one was said;
+     *                 naming another file with a book is refused, since the
+     *                 book is defined on its file
+     *   loose names   the files carrying every name; the named one if it is
+     *                 among them, the only one if there is one, else ask */
     if (sp->regime == KR_REGIME_HYPOTHETICAL) {
         sp->file = NULL;
     } else if (sp->book) {
@@ -888,7 +1065,8 @@ static void complete(const kr_context_t *ctx, kr_session_t *s, kr_spec_t *sp,
         }
     }
 
-    /* 6. The window, in observations counted back from the newest row. */
+    /* 6. The window, in observations counted back from the newest row, using
+     * trading days (252 a year, 21 a month). 0 means the whole file. */
     if (sp->window_months > 0)
         sp->max_obs = sp->window_months * DAYS_PER_MONTH;
     else if (sp->window_years > 0)
@@ -903,7 +1081,8 @@ static void complete(const kr_context_t *ctx, kr_session_t *s, kr_spec_t *sp,
         sp->n_simulations = KR_DEFAULT_SIMULATIONS;
     }
 
-    /* 7. Run it, after saying what will run. */
+    /* 7. Run it, after saying what will run. The session is cleared: a
+     * finished request leaves nothing for the next turn to inherit. */
     out->outcome = KR_RUN;
     out->spec = *sp;
     out->say[0] = '\0';
@@ -920,6 +1099,18 @@ void kr_session_init(kr_session_t *s)
     s->spec.window_years = -1;
 }
 
+/*
+ * One turn. In order:
+ *
+ *   1. tokens and features
+ *   2. early exits: a blank clip (silent, question kept), a refusal, too
+ *      many names
+ *   3. the file hint: the single file the utterance named, or -1 when none
+ *      or several were named
+ *   4. a pending question: fill its slot from this turn and complete()
+ *   5. otherwise a fresh request: build a draft from the features and
+ *      complete() it
+ */
 void kr_resolve(const kr_context_t *ctx, kr_session_t *s, const char *transcript,
                 kr_result_t *out)
 {
@@ -953,7 +1144,19 @@ void kr_resolve(const kr_context_t *ctx, kr_session_t *s, const char *transcript
         if (f.file_word[i]) { file_hint = i; n_hints++; }
     if (n_hints > 1) file_hint = -1;
 
-    /* A pending question, answered -- unless this is a new request in full. */
+    /* A pending question, answered -- unless this is a new request in full.
+     *
+     * "Fresh" means a verb plus something to run it on: "simulate the book"
+     * while a file question is pending is a new request, not an answer, and
+     * the old draft is dropped. Anything less is read as the answer to the
+     * pending slot. Once the slot is filled, a correlation heard in the same
+     * breath is kept too ("simulation, at point eight"), turning a historical
+     * draft stressed.
+     *
+     * A turn that neither answers nor asks for anything (a cough, "um") is
+     * silent and keeps the question. A turn that says something calculable
+     * but does not answer (a correlation while the subject is pending) falls
+     * through, drops the draft and is treated as a fresh request. */
     if (s->missing != KR_SLOT_NONE) {
         int fresh = f.op != KR_OP_NONE &&
                     (f.book || f.n_names > 0 || f.have_vol || f.have_rho);
@@ -996,7 +1199,13 @@ void kr_resolve(const kr_context_t *ctx, kr_session_t *s, const char *transcript
         kr_session_init(s);
     }
 
-    /* A fresh request. Nothing calculable at all is silence. */
+    /* A fresh request. Nothing calculable at all is silence: the voice loop
+     * hears the room all the time, and most of what it hears is not for it.
+     *
+     * The regime follows from what was heard: a vol makes it hypothetical
+     * (no file, every vol and correlation said), a correlation alone makes
+     * it stressed (the file's vols, every correlation replaced), neither
+     * leaves it historical. Names said with a book win over the book. */
     if (f.op == KR_OP_NONE && !f.book && !f.book_ambiguous && f.n_names == 0 &&
         !f.have_rho && !f.have_vol) {
         out->outcome = KR_SILENT;
