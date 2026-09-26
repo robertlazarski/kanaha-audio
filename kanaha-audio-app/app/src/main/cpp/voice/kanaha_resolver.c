@@ -423,7 +423,7 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
             (is_w(ts, i, "value") && is_w(ts, i + 1, "at") && is_w(ts, i + 2, "risk")))
             f->op = KR_OP_SIMULATE;
         else if (f->op == KR_OP_NONE &&
-                 (is_w(ts, i, "variance|variants|variances|variant") ||
+                 (is_w(ts, i, "variance|variants|variances|variant|variates|variate") ||
                   (is_w(ts, i, "volatility|vol") && !number_after(ts, i, NULL).ok)))
             f->op = KR_OP_VARIANCE;
     }

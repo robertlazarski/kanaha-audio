@@ -157,6 +157,9 @@ int main(void)
      * a portfolio, not an operation, so it earns one question. */
     RUN1("\"The Book\" alone asks for the operation", "The Book", KR_ASK,
          "I didn't catch what to run on it");
+    /* spoken 2026-09-25 through the Moto, in the Act 2 rehearsal */
+    RUN1("\"Portfolio Variates and the Book.\"", "Portfolio Variates and the Book.", KR_RUN,
+         "Portfolio variance.");
     /* spoken 2026-09-22 through the Moto: "the book" arrived as "the port." */
     RUN1("\"the port.\" is the book", "the port.", KR_ASK, "The book \xe2\x80\x94 MSFT");
     RUN1("\"variance on the port\"", "portfolio variance on the port", KR_RUN, "The book");
