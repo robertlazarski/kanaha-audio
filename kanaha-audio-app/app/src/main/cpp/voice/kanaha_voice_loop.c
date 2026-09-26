@@ -306,8 +306,10 @@ static const char *cancelled(const char *text)
 }
 
 /* Remove the trigger words, so the resolver sees the request, not the cue.
- * The first occurrence of each trigger is cut, case-insensitively, as a
- * substring -- not a whole-word match like lower_contains_word(). */
+ * The first whole-word occurrence of each trigger is cut, case-insensitively:
+ * "Calculate, the book" loses "Calculate", but "the calculated variance"
+ * keeps every letter -- cutting inside a word would leave a stray "d" for the
+ * resolver to read. */
 static void strip_triggers(char *text)
 {
     int i;
@@ -318,9 +320,14 @@ static void strip_triggers(char *text)
         size_t k;
         for (k = 0; text[k] && k < sizeof(low) - 1; k++) low[k] = (char)tolower((unsigned char)text[k]);
         low[k] = '\0';
-        if ((p = strstr(low, TRIGGERS[i]))) {
+        for (p = strstr(low, TRIGGERS[i]); p; p = strstr(p + 1, TRIGGERS[i])) {
             size_t at = (size_t)(p - low);
-            memmove(text + at, text + at + tl, strlen(text + at + tl) + 1);
+            int starts = at == 0 || !isalnum((unsigned char)low[at - 1]);
+            int ends = !isalnum((unsigned char)low[at + tl]);
+            if (starts && ends) {
+                memmove(text + at, text + at + tl, strlen(text + at + tl) + 1);
+                break;
+            }
         }
     }
     /* trim the punctuation and spaces the cut leaves at either end */
