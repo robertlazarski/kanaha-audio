@@ -134,14 +134,21 @@ Also useful for finding misplaced phones. During development, a Pixel went missi
 
 ## Device Discovery
 
+Finds every Kanaha app on the network -- Audio, Camera and Calcs -- and checks
+each over mTLS with the certificates in `~/kanaha-ca` (or `$KANAHA_CERT_DIR`).
+The same script ships in all three projects.
+
 ```bash
-# mDNS (instant, requires avahi-utils)
+# mDNS (instant, requires avahi-utils), port scan if mDNS finds nothing
 ./tools/kanaha-audio-discover.sh
+
+# Only the audio phones
+./tools/kanaha-audio-discover.sh --kind audio
 
 # Direct IP
 ./tools/kanaha-audio-discover.sh --ip 192.168.1.100
 
-# JSON output
+# JSON output (each entry has a "kind")
 ./tools/kanaha-audio-discover.sh --json
 ```
 

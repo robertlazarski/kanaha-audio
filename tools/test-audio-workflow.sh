@@ -152,14 +152,14 @@ discover_devices() {
     # Try kanaha-audio-discover.sh if available
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     if [[ -x "$SCRIPT_DIR/kanaha-audio-discover.sh" && -z "$AUDIO_ADDR" ]]; then
-        AUDIO_ADDR=$("$SCRIPT_DIR/kanaha-audio-discover.sh" --json 2>/dev/null | \
+        AUDIO_ADDR=$("$SCRIPT_DIR/kanaha-audio-discover.sh" --kind audio --json 2>/dev/null | \
             python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['ip'])" 2>/dev/null || true)
     fi
 
     # Try kanaha-discover.sh for camera
     CAMERA_DISCOVER="$HOME/repos/kanaha/tools/kanaha-discover.sh"
     if [[ -x "$CAMERA_DISCOVER" && -z "$VIDEO_ADDR" ]]; then
-        VIDEO_ADDR=$("$CAMERA_DISCOVER" --json 2>/dev/null | \
+        VIDEO_ADDR=$("$CAMERA_DISCOVER" --kind camera --json 2>/dev/null | \
             python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['ip'])" 2>/dev/null || true)
     fi
 
