@@ -527,15 +527,16 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
     /* Operation. A simulation word anywhere makes it a simulation, even after
      * a variance word ("the variance ... simulated forward"), because a
      * simulation is the bigger request and says more. Variance is taken only
-     * while nothing else has been. "variants", "variates" and friends are
-     * whisper's spellings of "variance". A vol word followed by a number is a
+     * while nothing else has been. "variants", "variates" and "varies" are
+     * whisper's spellings of "variance", each heard on the Moto in a rehearsal
+     * ("Portfolio varies on the book.", 2026-09-26). A vol word followed by a number is a
      * regime ("vol at 22"), not a verb, so it is left to the vol block. */
     for (i = 0; i < ts->n; i++) {
         if (is_w(ts, i, "simulate|simulation|simulated|simulating|forward|ahead|monte") ||
             (is_w(ts, i, "value") && is_w(ts, i + 1, "at") && is_w(ts, i + 2, "risk")))
             f->op = KR_OP_SIMULATE;
         else if (f->op == KR_OP_NONE &&
-                 (is_w(ts, i, "variance|variants|variances|variant|variates|variate") ||
+                 (is_w(ts, i, "variance|variants|variances|variant|variates|variate|varies") ||
                   (is_w(ts, i, "volatility|vol") && !number_after(ts, i, NULL).ok)))
             f->op = KR_OP_VARIANCE;
     }

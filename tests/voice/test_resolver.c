@@ -160,6 +160,13 @@ int main(void)
     /* spoken 2026-09-25 through the Moto, in the Act 2 rehearsal */
     RUN1("\"Portfolio Variates and the Book.\"", "Portfolio Variates and the Book.", KR_RUN,
          "Portfolio variance.");
+    /* spoken 2026-09-26 through the Moto, in the full run: asked, then ran the
+     * wrong answer */
+    RUN1("\"Portfolio varies on the book.\"", "Portfolio varies on the book.", KR_RUN,
+         "Portfolio variance.");
+    /* a simulation word still wins over it */
+    RUN1("\"varies\" loses to \"simulate\"", "simulate the book, it varies", KR_RUN,
+         "Simulating one year forward");
     /* spoken 2026-09-22 through the Moto: "the book" arrived as "the port." */
     RUN1("\"the port.\" is the book", "the port.", KR_ASK, "The book \xe2\x80\x94 MSFT");
     RUN1("\"variance on the port\"", "portfolio variance on the port", KR_RUN, "The book");
@@ -327,6 +334,9 @@ int main(void)
 
     /* spoken 2026-09-22 */
     RUN1("three decimals", "[BLANK_AUDIO] [BEEP]  Same book.  Correlations at 0.857", KR_REFUSE,
+         "I heard a correlation of 0.857, three decimals");
+    /* the Act 2 closing step, as words */
+    RUN1("three decimals, spoken", "Same book, correlations at point eight five seven.", KR_REFUSE,
          "I heard a correlation of 0.857, three decimals");
     RUN1("a covariance cell, misheard", "Set the whole variance between apple and amazon to 0.042",
          KR_REFUSE, "I won't take a covariance by voice");
