@@ -581,14 +581,8 @@ static void handle_request(const char *trigger_clip, const char *bridge_clip)
             outcome = "ERROR";
         }
         LOGI("[request] '%s' -> %s", text, outcome);
-        /* A request that got through proves the calcs phone is reachable
-         * again, so a start-up complaint that it was not is stale now. */
-        if (strcmp(outcome, "ERROR") != 0) {
-            pthread_mutex_lock(&s_lock);
-            if (strncmp(s_last_error, "autostart:", 10) == 0)
-                s_last_error[0] = '\0';
-            pthread_mutex_unlock(&s_lock);
-        }
+        if (strcmp(outcome, "ERROR") != 0)
+            kanaha_voice_loop_note_ready();
         {
             /* What the room heard: the answer's SAY line, or the question,
              * refusal or read-back when there was no answer. */
@@ -756,6 +750,51 @@ static void *loop_main(void *arg)
  * when the server is started from the app. */
 extern void kanaha_audio_ensure_initialised(void);
 
+#define PREPARE_RETRY_FIRST_SECS  10
+#define PREPARE_RETRY_MAX_SECS    60
+
+/* A start-up complaint goes in last_error with the "autostart:" prefix, and
+ * only over nothing or an earlier start-up complaint: a newer error from the
+ * loop itself (a failing keyword search, say) is not overwritten. */
+static void set_start_error(const char *what)
+{
+    pthread_mutex_lock(&s_lock);
+    if (!s_last_error[0] || strncmp(s_last_error, "autostart:", 10) == 0)
+        snprintf(s_last_error, sizeof(s_last_error), "autostart: %s", what);
+    pthread_mutex_unlock(&s_lock);
+}
+
+void kanaha_voice_loop_note_ready(void)
+{
+    pthread_mutex_lock(&s_lock);
+    if (strncmp(s_last_error, "autostart:", 10) == 0)
+        s_last_error[0] = '\0';
+    pthread_mutex_unlock(&s_lock);
+}
+
+/* Until the calcs phone answers: prepare again every 10 s, backing off to
+ * once a minute, so the phones can start in any order and the status says
+ * ready as soon as they can talk. A request that prepared first (typed or
+ * spoken) makes the next attempt return at once. */
+static void prepare_until_ready(void)
+{
+    char prep[256], msg[320];
+    int wait = PREPARE_RETRY_FIRST_SECS;
+    for (;;) {
+        if (kanaha_voice_prepare(prep, sizeof(prep)) == 0) {
+            kanaha_voice_loop_note_ready();
+            LOGI("autostart: the calcs phone is ready");
+            return;
+        }
+        snprintf(msg, sizeof(msg), "listening, but %s Retrying every %d s.", prep, wait);
+        set_start_error(msg);
+        LOGE("autostart: %s", msg);
+        sleep((unsigned)wait);
+        if (wait < PREPARE_RETRY_MAX_SECS)
+            wait = wait * 2 > PREPARE_RETRY_MAX_SECS ? PREPARE_RETRY_MAX_SECS : wait * 2;
+    }
+}
+
 static void *autostart_main(void *arg)
 {
     sigset_t all;
@@ -787,28 +826,17 @@ static void *autostart_main(void *arg)
     if (json_object_object_get_ex(loop, "spec_secs", &v)) c.spec_secs = json_object_get_double(v);
     json_object_put(cfg);
 
-    /* Connect and fetch the catalog first, so a wrong address or a missing
-     * book is in the status now, not discovered by the first thing somebody
-     * says. It does not stop the loop: a calcs phone that is off at startup
-     * may be on by the first request, and the request says so if it is not. */
-    {
-        char prep[256];
-        int prepared = kanaha_voice_prepare(prep, sizeof(prep)) == 0;
-        if (kanaha_voice_loop_start(&c, err, sizeof(err)) != 0) {
-            pthread_mutex_lock(&s_lock);
-            snprintf(s_last_error, sizeof(s_last_error), "autostart: %s", err);
-            pthread_mutex_unlock(&s_lock);
-            LOGE("autostart: %s", err);
-            return NULL;
-        }
-        if (!prepared) {
-            pthread_mutex_lock(&s_lock);
-            snprintf(s_last_error, sizeof(s_last_error), "autostart: listening, but %s", prep);
-            pthread_mutex_unlock(&s_lock);
-            LOGE("autostart: listening, but %s", prep);
-        }
+    /* Listen first, then connect and fetch the catalog, so a wrong address
+     * or a missing book is in the status now, not discovered by the first
+     * thing somebody says. A calcs phone that is not up yet does not stop
+     * the loop; this thread keeps trying until it is. */
+    if (kanaha_voice_loop_start(&c, err, sizeof(err)) != 0) {
+        set_start_error(err);
+        LOGE("autostart: %s", err);
+        return NULL;
     }
     LOGI("autostart: listening");
+    prepare_until_ready();
     return NULL;
 }
 

@@ -1028,7 +1028,10 @@ int audio_search_service_invoke_json_impl(
             create_error_response(json_response, response_size, "Missing required field: text");
             return -1;
         }
-        return kanaha_voice_request(text, speak, json_response, response_size);
+        if (kanaha_voice_request(text, speak, json_response, response_size) != 0)
+            return -1;
+        kanaha_voice_loop_note_ready();     /* the calcs phone answered */
+        return 0;
     }
     else if (strcmp(action, "voiceReset") == 0) {
         kanaha_voice_reset();

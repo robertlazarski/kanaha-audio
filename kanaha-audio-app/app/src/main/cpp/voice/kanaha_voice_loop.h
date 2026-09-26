@@ -46,6 +46,11 @@ int kanaha_voice_loop_start(const kvl_config_t *cfg, char *err, int err_len);
  * being answered is answered) and releases the microphone. */
 void kanaha_voice_loop_stop(void);
 
+/* The voice path has reached the calcs phone: clear a start-up complaint
+ * ("autostart: ...") from last_error. Called after any request that got
+ * through, typed or spoken. */
+void kanaha_voice_loop_note_ready(void);
+
 /* Whether the loop holds the microphone (starting, running or stopping). */
 int kanaha_voice_loop_active(void);
 
