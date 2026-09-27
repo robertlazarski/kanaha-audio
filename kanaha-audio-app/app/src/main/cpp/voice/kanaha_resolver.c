@@ -529,10 +529,13 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
      * simulation is the bigger request and says more. Variance is taken only
      * while nothing else has been. "variants", "variates" and "varies" are
      * whisper's spellings of "variance", each heard on the Moto in a rehearsal
-     * ("Portfolio varies on the book.", 2026-09-26). A vol word followed by a number is a
-     * regime ("vol at 22"), not a verb, so it is left to the vol block. */
+     * ("Portfolio varies on the book.", 2026-09-26). "similarly" is how it wrote
+     * "simulate the" ("Similarly, the book at correlation.8.", 2026-09-26), the
+     * way it ran "show the" into "showed at"; it has no other use here. A vol
+     * word followed by a number is a regime ("vol at 22"), not a verb, so it is
+     * left to the vol block. */
     for (i = 0; i < ts->n; i++) {
-        if (is_w(ts, i, "simulate|simulation|simulated|simulating|forward|ahead|monte") ||
+        if (is_w(ts, i, "simulate|simulation|simulated|simulating|similarly|forward|ahead|monte") ||
             (is_w(ts, i, "value") && is_w(ts, i + 1, "at") && is_w(ts, i + 2, "risk")))
             f->op = KR_OP_SIMULATE;
         else if (f->op == KR_OP_NONE &&
@@ -629,9 +632,10 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
         }
     }
     /* "the port" is how whisper heard "the book" in the spoken trials of
-     * 2026-09-22. No other word here is "port" ("portfolio" is one word), and
-     * the read-back expands the book aloud, so a wrong match is heard. */
-    if (!f->book && find_w(ts, "book|books|port") >= 0) {
+     * 2026-09-22, and "the block" in the rehearsal of 2026-09-26. No other word
+     * here is "port" or "block" ("portfolio" is one word), and the read-back
+     * expands the book aloud, so a wrong match is heard. */
+    if (!f->book && find_w(ts, "book|books|port|block|blocks") >= 0) {
         if (ctx->n_books == 1)
             f->book = &ctx->books[0];
         else if (ctx->n_books > 1)

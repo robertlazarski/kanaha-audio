@@ -169,6 +169,11 @@ int main(void)
          "Simulating one year forward");
     /* spoken 2026-09-22 through the Moto: "the book" arrived as "the port." */
     RUN1("\"the port.\" is the book", "the port.", KR_ASK, "The book \xe2\x80\x94 MSFT");
+    /* spoken 2026-09-26 through the Moto, on the Pixel's hotspot */
+    RUN1("\"on the block\" is the book", "Portfolio variance on the block.", KR_RUN,
+         "Portfolio variance.");
+    RUN1("\"Similarly, the book\" simulates", "Similarly, the book at correlation.8.", KR_RUN,
+         "Simulating one year forward");
     RUN1("\"variance on the port\"", "portfolio variance on the port", KR_RUN, "The book");
     {
         turn_t t[] = { { "The Book", KR_ASK, NULL },
