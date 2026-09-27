@@ -44,6 +44,12 @@ int kanaha_voice_request(const char *transcript, int speak, char *json_out, size
  * state, so it has its own phrase and no read-back: the effect is visible. */
 int kanaha_voice_camera(int start, char *err, int err_len);
 
+/* Ask the camera phone to describe its newest clip from today with its
+ * on-device model (Gemini Nano, through the camera's describeClip), one frame
+ * from the middle. 0 with the description in `said`, or -1 with a sayable
+ * reason in err. Takes about five seconds. */
+int kanaha_voice_describe_clip(char *said, int said_len, char *err, int err_len);
+
 /* Say a line on this phone's speaker (flite). Blocks until it has been said. */
 void kanaha_voice_say(const char *text);
 

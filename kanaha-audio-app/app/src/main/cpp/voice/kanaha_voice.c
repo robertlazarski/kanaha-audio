@@ -7,6 +7,8 @@
  *   kanaha_voice_request  transcript -> kr_resolve -> say the read-back
  *                         -> kc_execute -> ka_answer -> say the answer
  *   kanaha_voice_camera   one startRecording/stopRecording to the camera
+ *   kanaha_voice_describe_clip  the camera's newest clip, described by its
+ *                         on-device model (Gemini Nano, describeClip)
  *
  * Everything here is process state (the statics below), set up lazily on
  * the first request by ensure_ready() and dropped by kanaha_voice_reset().
@@ -24,6 +26,7 @@
 #include <json-c/json.h>
 
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -300,6 +303,102 @@ int kanaha_voice_camera(int start, char *err, int err_len)
     if (r) json_object_put(r);
     pthread_mutex_unlock(&s_lock);
     return rc;
+}
+
+/* POST one camera operation; the parsed response, or NULL with a sayable err.
+ * Caller holds s_lock and has made s_env and s_cam_client. */
+static json_object *camera_post(const char *op, const char *body, char *err, int err_len)
+{
+    char path[128];
+    axis2_char_t *resp = NULL;
+    size_t len = 0;
+    int status = 0;
+    json_object *r, *v;
+
+    snprintf(path, sizeof(path), "/services/CameraControlService/%s", op);
+    if (axis2_h2_json_client_post(s_cam_client, s_env, path, body, strlen(body), &resp, &len,
+                                  &status) != AXIS2_SUCCESS) {
+        snprintf(err, (size_t)err_len, "I couldn't reach the camera: %s.",
+                 axis2_h2_json_client_get_error(s_cam_client));
+        return NULL;
+    }
+    r = json_tokener_parse(resp);
+    AXIS2_FREE(s_env->allocator, resp);
+    if (r && json_object_object_get_ex(r, "success", &v) && json_object_get_boolean(v))
+        return r;
+    snprintf(err, (size_t)err_len, "The camera could not %s: %s", op,
+             (r && json_object_object_get_ex(r, "error", &v)) ? json_object_get_string(v)
+                                                              : "no reason given.");
+    if (r) json_object_put(r);
+    return NULL;
+}
+
+int kanaha_voice_describe_clip(char *said, int said_len, char *err, int err_len)
+{
+    json_object *list = NULL, *files, *d = NULL, *frames, *v;
+    const char *newest = NULL;
+    int64_t newest_ms = -1;
+    char body[384], name[256] = "";
+    size_t i;
+
+    pthread_mutex_lock(&s_lock);
+    if (!s_env) {
+        axutil_allocator_t *a = axutil_allocator_init(NULL);
+        char logp[640];
+        snprintf(logp, sizeof(logp), "%s/voice/kanaha-voice.log", s_files);
+        s_env = axutil_env_create_with_error_log(a, axutil_error_create(a),
+                                                 axutil_log_create(a, NULL, logp));
+    }
+    if (!s_cam_client && !(s_cam_client = client_for("camera", err, err_len))) {
+        pthread_mutex_unlock(&s_lock);
+        return -1;
+    }
+    /* The camera names its files itself (VID_<date>_<time>.mp4), so the clip
+     * to describe is the newest one recorded today, not one this phone named. */
+    if (!(list = camera_post("listFiles", "{\"pattern\":\"today\"}", err, err_len))) {
+        pthread_mutex_unlock(&s_lock);
+        return -1;
+    }
+    if (json_object_object_get_ex(list, "files", &files) &&
+        json_object_is_type(files, json_type_array)) {
+        for (i = 0; i < json_object_array_length(files); i++) {
+            json_object *f = json_object_array_get_idx(files, i), *n, *t;
+            if (json_object_object_get_ex(f, "name", &n) &&
+                json_object_object_get_ex(f, "modified_timestamp", &t) &&
+                json_object_get_int64(t) > newest_ms) {
+                newest_ms = json_object_get_int64(t);
+                newest = json_object_get_string(n);
+            }
+        }
+    }
+    if (newest) snprintf(name, sizeof(name), "%s", newest);
+    json_object_put(list);
+    if (!name[0]) {
+        snprintf(err, (size_t)err_len, "The camera has no clip from today to describe.");
+        pthread_mutex_unlock(&s_lock);
+        return -1;
+    }
+    /* One frame from the middle: Gemini Nano takes about four seconds a frame
+     * on the Pixel, and one sentence is what the room can listen to. */
+    snprintf(body, sizeof(body), "{\"video_filename\":\"%s\",\"frame_count\":1,\"write_sidecar\":true}",
+             name);
+    if (!(d = camera_post("describeClip", body, err, err_len))) {
+        pthread_mutex_unlock(&s_lock);
+        return -1;
+    }
+    said[0] = '\0';
+    if (json_object_object_get_ex(d, "frames", &frames) &&
+        json_object_is_type(frames, json_type_array) && json_object_array_length(frames) > 0 &&
+        json_object_object_get_ex(json_object_array_get_idx(frames, 0), "description", &v))
+        snprintf(said, (size_t)said_len, "%s", json_object_get_string(v));
+    json_object_put(d);
+    pthread_mutex_unlock(&s_lock);
+    if (!said[0]) {
+        snprintf(err, (size_t)err_len, "Gemini Nano gave no description for the clip.");
+        return -1;
+    }
+    LOGI("described %s: %.160s", name, said);
+    return 0;
 }
 
 void kanaha_voice_say(const char *text)
