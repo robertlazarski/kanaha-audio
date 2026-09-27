@@ -108,10 +108,16 @@ static const char *TRIGGERS[] = { "calculate", "run it", "stress it", "simulate 
  * last two words only. tiny.en on this phone runs "show the" together: the
  * spoken trials of 2026-09-24 came back "Showed at numbers please" twice,
  * while "numbers" and "please" came through at 0.99 and 0.94. No names in any
- * of it -- whisper hears "Claude" as "cloud" and "Kanaha" several ways. */
+ * of it -- whisper hears "Claude" as "cloud" and "Kanaha" several ways.
+ *
+ * The demo's finale is said "run the crash test please" and matched on its
+ * last three words, which share nothing with the switch's "numbers please".
+ * Like the switch it only posts an event: the laptop runs the stress table,
+ * because one of its rows (MCP over stdio) needs a shell on the calcs phone. */
 #define KW_CAMERA_START  N_TRIGGERS
 #define KW_CAMERA_STOP   (N_TRIGGERS + 1)
 #define KW_SWITCH        (N_TRIGGERS + 2)
+#define KW_STRESS        (N_TRIGGERS + 3)
 
 /* Each phrase searched for, and what it does. A phrase may be listed in the
  * forms whisper actually writes: "stop the" and "start the" run together on
@@ -129,6 +135,9 @@ static const struct { const char *phrase; int action; } KEYWORDS[] = {
     { "stop a cameras please", KW_CAMERA_STOP },
     { "stop the camera please", KW_CAMERA_STOP },
     { "numbers please", KW_SWITCH },
+    { "crash test please", KW_STRESS },
+    { "crash tests please", KW_STRESS },
+    { "crashed test please", KW_STRESS },
 };
 #define N_KEYWORDS ((int)(sizeof(KEYWORDS) / sizeof(KEYWORDS[0])))
 
@@ -138,7 +147,8 @@ static const struct { const char *phrase; int action; } KEYWORDS[] = {
  * (2026-09-24): primed or not, none produced a phrase -- the failure to fear
  * with a prompt is whisper echoing it back into silence. */
 static const char *TRIGGER_PROMPT =
-    "Calculate. Start the cameras please. Stop the cameras please. Show the numbers please.";
+    "Calculate. Start the cameras please. Stop the cameras please. Show the numbers please. "
+    "Run the crash test please.";
 
 /* Said inside a window, any of these throws the utterance away. Decided here,
  * not by the resolver: a cancel must cost nothing and must be impossible to
@@ -486,7 +496,8 @@ static void post_event(const char *what)
     LOGI("[event %ld] %s", s_ev_seq, what);
 }
 
-/* A phrase that acts by itself: the camera, or the demo's app switch. */
+/* A phrase that acts by itself: the camera, the demo's app switch, or its
+ * finale. The last two only post an event for the laptop to act on. */
 static void handle_action(int kw)
 {
     char err[256];
@@ -506,6 +517,10 @@ static void handle_action(int kw)
         post_event("switch-to-calcs");
         remember_said("show the numbers please", "SWITCH", "Changing the demo to Kanaha Calcs.");
         kanaha_voice_say("Changing the demo to Kanaha Calcs.");
+    } else if (kw == KW_STRESS) {
+        post_event("run-stress-test");
+        remember_said("run the crash test please", "STRESS", "Running the crash test.");
+        kanaha_voice_say("Running the crash test.");
     }
 }
 
