@@ -27,7 +27,9 @@
 # Certificates: $KANAHA_CERT_DIR (default ~/kanaha-ca) holding operator.crt,
 # operator.key and kanaha-ca.crt, or client.crt, client.key and ca.crt.
 # The names verified: $KANAHA_CAMERA_TLS_NAME (camera.local),
-# $KANAHA_CALCS_TLS_NAME (calcs.local); Kanaha Audio's certificate carries its IP.
+# $KANAHA_CALCS_TLS_NAME (calcs.local), $KANAHA_AUDIO_TLS_NAME (audio.local).
+# Kanaha Audio's certificate also carries the IP it had when provisioned, so it
+# is tried by IP first; on another network the name is what verifies.
 #
 # Scripts that act on one kind should pass --kind: a phone can run several
 # apps, so without it one IP can appear more than once.
@@ -81,7 +83,7 @@ tls_name_of() {
     case $1 in
         camera) echo "${KANAHA_CAMERA_TLS_NAME:-camera.local}" ;;
         calcs)  echo "${KANAHA_CALCS_TLS_NAME:-calcs.local}" ;;
-        audio)  echo "" ;;
+        audio)  echo "${KANAHA_AUDIO_TLS_NAME:-audio.local}" ;;
     esac
 }
 wanted() { [[ -z "$ONLY" || "$ONLY" = "$1" ]]; }
@@ -176,9 +178,14 @@ discover_via_avahi() {
         api=$(printf '%s\n' "$txt" | grep -oP '"api=\K[^"]+')
         kind=$(kind_of "$api")
         [[ -n "$kind" ]] && wanted "$kind" || continue
-        # The "ip" TXT record is the phone's own IPv4; prefer it to an IPv6 addr.
-        local txt_ip; txt_ip=$(printf '%s\n' "$txt" | grep -oP '"ip=\K[^"]+')
-        [[ -n "$txt_ip" ]] && addr=$txt_ip
+        # The address mDNS resolved is current. The "ip" TXT record is written
+        # when the app starts and goes stale when the phone changes network
+        # (seen 2026-09-26 on moving to a hotspot), so use it only in place of
+        # an IPv6 address.
+        if [[ "$addr" == *:* ]]; then
+            local txt_ip; txt_ip=$(printf '%s\n' "$txt" | grep -oP '"ip=\K[^"]+')
+            [[ -n "$txt_ip" ]] && addr=$txt_ip
+        fi
         model=$(printf '%s\n' "$txt" | grep -oP '"model=\K[^"]+'); manu=$(printf '%s\n' "$txt" | grep -oP '"manufacturer=\K[^"]+')
         probe "$kind" "$addr" "$port" "$name" "${model:-Unknown}" "${manu:-Unknown}" "$host"
     done < <(timeout 8 avahi-browse -rpt _https._tcp 2>/dev/null | sort -u -t';' -k4,4 -k8,9 || true)
@@ -223,6 +230,20 @@ else
     if [[ "$FORCE_SCAN" = false ]] && command -v avahi-browse &>/dev/null; then
         say "Discovering Kanaha apps via mDNS..."
         discover_via_avahi
+        # On a phone's hotspot the default gateway is that phone, and Android
+        # answers mDNS on its tethering interface only intermittently (seen
+        # 2026-09-26), so any kind mDNS did not return is tried there.
+        GW=$(ip route 2>/dev/null | awk '/^default/ {print $3; exit}')
+        if [[ -n "$GW" ]]; then
+            for kind in camera audio calcs; do
+                wanted "$kind" || continue
+                grep -q "^$kind$US" "$TMPFILE" 2>/dev/null && continue
+                port=$(port_of "$kind")
+                timeout 1 bash -c "echo >/dev/tcp/$GW/$port" 2>/dev/null || continue
+                probe "$kind" "$GW" "$port" "" "Unknown" "Unknown" ""
+            done
+            keep_answered_only
+        fi
     fi
     if [[ ! -s "$TMPFILE" ]]; then
         [[ "$FORCE_SCAN" = false ]] && say "Nothing found via mDNS, falling back to a port scan..."
