@@ -143,10 +143,17 @@ static const struct { const char *phrase; int action; } KEYWORDS[] = {
     { "crash test please", KW_STRESS },
     { "crash tests please", KW_STRESS },
     { "crashed test please", KW_STRESS },
+    /* Rehearsal 2026-09-27: "crash" was lost, and the clip read "run the test
+     * please". No other phrase here ends in "test please". */
+    { "run the test please", KW_STRESS },
     { "describe the clip please", KW_DESCRIBE },
     { "describe the clips please", KW_DESCRIBE },
     { "describe a clip please", KW_DESCRIBE },
     { "described the clip please", KW_DESCRIBE },
+    /* Rehearsal 2026-09-27: the phrase fell across a clip boundary and the
+     * joined clips read "describe the please". The first clip alone read
+     * "describe the clip", which is specific enough to act on without "please". */
+    { "describe the clip", KW_DESCRIBE },
 };
 #define N_KEYWORDS ((int)(sizeof(KEYWORDS) / sizeof(KEYWORDS[0])))
 
@@ -675,6 +682,39 @@ static void handle_request(const char *trigger_clip, const char *bridge_clip)
  * microphone stopped, every clip it used is deleted, and recording resumes
  * on a fresh name.
  */
+/* Lines not spoken by the loop: how many callers are saying one now, and a
+ * count bumped on every start and end. Counted, not toggled, because calls can
+ * overlap -- a second speak is refused as busy while the first is still
+ * talking, and its own "finished" must not end the first one's. A clip is
+ * clean if nobody was speaking when it began and the count has not moved by
+ * the time it stopped. */
+static int s_ext_speakers;
+static unsigned s_ext_speech;
+
+void kanaha_voice_loop_external_speech(int speaking)
+{
+    pthread_mutex_lock(&s_lock);
+    if (speaking) {
+        s_ext_speakers++;
+        s_ext_speech++;
+    } else if (s_ext_speakers > 0) {
+        s_ext_speakers--;
+        s_ext_speech++;
+    }
+    pthread_mutex_unlock(&s_lock);
+}
+
+/* The count, with the low bit forced on while anyone is speaking, so one
+ * number answers both "was it quiet at the start" and "did anything happen". */
+static unsigned ext_speech_count(void)
+{
+    unsigned n;
+    pthread_mutex_lock(&s_lock);
+    n = (s_ext_speech << 1) | (s_ext_speakers > 0 ? 1u : 0u);
+    pthread_mutex_unlock(&s_lock);
+    return n;
+}
+
 static void *loop_main(void *arg)
 {
     static const char *CLIPS[N_CLIPS] = { "vl_0", "vl_1", "vl_2", "vl_3" };
@@ -682,6 +722,7 @@ static void *loop_main(void *arg)
     double last_request = -1e9;
     const char *prev = NULL;     /* the clip before `just`, searched with it */
     int failed_searches = 0;     /* in a row; a deaf loop must say it is deaf */
+    unsigned clip_speech[N_CLIPS] = { 0 };  /* ext_speech_count() as each clip began */
     (void)arg;
 
     if (whisper_bridge_load_model(s_model) != 0) {
@@ -697,11 +738,12 @@ static void *loop_main(void *arg)
     pthread_mutex_unlock(&s_lock);
     LOGI("listening: clips %.1f s, windows %.1f s, model %s", s_cfg.clip_secs, s_cfg.spec_secs, s_model);
 
+    clip_speech[ci] = ext_speech_count();
     if (rec_start(CLIPS[ci]) != 0)
         s_stop = 1;
     while (!s_stop) {
         const char *just;
-        int hit;
+        int hit, clean;
         if (!nap(s_cfg.clip_secs))
             break;
         /* Pipelined: re-arm first, then search the clip that just closed while
@@ -709,10 +751,23 @@ static void *loop_main(void *arg)
          * whole search, and a trigger said in that gap was simply never heard. */
         rec_stop();
         just = CLIPS[ci];
+        clean = !(clip_speech[ci] & 1u) && clip_speech[ci] == ext_speech_count();
         ci = (ci + 1) % N_CLIPS;
+        clip_speech[ci] = ext_speech_count();
         if (rec_start(CLIPS[ci]) != 0)
             break;
         s_clips++;
+        if (!clean) {
+            /* The phone was saying a line from the laptop while this clip
+             * recorded: what it holds is the phone's own voice. Neither it nor
+             * the clip before it is searched, so the join cannot straddle it. */
+            LOGI("[clip %s] recorded while the phone was speaking - skipped", just);
+            if (prev)
+                discard(prev);
+            discard(just);
+            prev = NULL;
+            continue;
+        }
         /* Search the previous clip and this one together: each boundary is
          * then seen twice, once from each side. Only two clips (about twelve
          * seconds) are ever on disk; the older is dropped after the search. */
@@ -758,6 +813,7 @@ static void *loop_main(void *arg)
         discard("vl_answer");
         /* back to listening */
         ci = (ci + 1) % N_CLIPS;
+        clip_speech[ci] = ext_speech_count();
         if (!s_stop && rec_start(CLIPS[ci]) != 0)
             break;
     }

@@ -51,6 +51,12 @@ void kanaha_voice_loop_stop(void);
  * through, typed or spoken. */
 void kanaha_voice_loop_note_ready(void);
 
+/* The phone is starting (1) or has finished (0) saying a line the loop did not
+ * ask for -- the speak operation, sent from the laptop. The loop does not
+ * search a clip recorded while such a line was being said: the microphone would
+ * hear the phone's own speaker, and a line containing a phrase would fire it. */
+void kanaha_voice_loop_external_speech(int speaking);
+
 /* Whether the loop holds the microphone (starting, running or stopping). */
 int kanaha_voice_loop_active(void);
 

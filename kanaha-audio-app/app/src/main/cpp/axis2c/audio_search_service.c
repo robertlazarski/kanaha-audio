@@ -995,7 +995,13 @@ int audio_search_service_invoke_json_impl(
          * phone's own voice in that recording. Overlapping calls are refused
          * (AUDIO_SPEAK_BUSY), so at most one worker waits here. */
         audio_speak_result_t spoken;
+#ifdef KANAHA_VOICE
+        kanaha_voice_loop_external_speech(1);   /* the loop must not hear this */
+#endif
         int speak_rc = audio_speak_text(text, audio_dir, &spoken);
+#ifdef KANAHA_VOICE
+        kanaha_voice_loop_external_speech(0);
+#endif
         if (speak_rc == AUDIO_SPEAK_BUSY) {
             create_error_response(json_response, response_size,
                                   "Already speaking; one utterance at a time");
