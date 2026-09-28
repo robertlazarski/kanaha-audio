@@ -442,6 +442,7 @@ typedef struct {
 
     int have_rho;
     double rho;
+    int rho_unvalued;   /* a correlation word with no number after it */
     int have_vol;
     double vol;         /* fraction */
 
@@ -551,8 +552,14 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
         if (!is_w(ts, i, "correlation|correlations|correlated|correlate|rho"))
             continue;
         nr = number_after(ts, i, &pct);
-        if (!nr.ok)
+        if (!nr.ok) {
+            /* Remembered, not dropped: in the rehearsal of 2026-09-27 the
+             * window closed on "...on the book at correlation" and the value
+             * was cut off. Ignoring the word ran plain variance instead of the
+             * request that was meant; complete() asks for the value. */
+            f->rho_unvalued = 1;
             continue;
+        }
         if (nr.decimals > 2) {
             char msg[KR_SAY_LEN];
             decimals_word(nr.decimals, dbuf, sizeof(dbuf));
@@ -965,6 +972,17 @@ static void complete(const kr_context_t *ctx, kr_session_t *s, kr_spec_t *sp,
         }
     }
 
+    /* A correlation named without its value -- the end of the phrase cut off
+     * by the window -- is asked for, never guessed and never ignored. */
+    if (sp->regime == KR_REGIME_HISTORICAL && sp->rho_unheard) {
+        /* The answer must carry the word: "point eight" alone is not taken as
+         * an answer anywhere (see KR_SLOT_CORRELATION), so the question says so. */
+        snprintf(out->say, sizeof(out->say), "I heard a correlation, but not its value. "
+                 "Say it with the word correlation: correlation point eight, for instance.");
+        ask(s, out, sp, KR_SLOT_CORRELATION, 1);
+        return;
+    }
+
     /* 3. A hypothetical regime needs its correlation. (A stressed regime
      * only exists because a correlation was heard, so it never lacks one.) */
     if (sp->regime == KR_REGIME_HYPOTHETICAL && !sp->have_rho) {
@@ -1184,7 +1202,14 @@ void kr_resolve(const kr_context_t *ctx, kr_session_t *s, const char *transcript
             } else if (slot == KR_SLOT_FILE) {
                 if (file_hint >= 0) filled = 1;
             } else if (slot == KR_SLOT_CORRELATION) {
-                if (f.have_rho) { sp.rho = f.rho; sp.have_rho = 1; filled = 1; }
+                if (f.have_rho) {
+                    sp.rho = f.rho;
+                    sp.have_rho = 1;
+                    sp.rho_unheard = 0;
+                    if (sp.regime == KR_REGIME_HISTORICAL)
+                        sp.regime = KR_REGIME_STRESSED;
+                    filled = 1;
+                }
             }
             if (filled) {
                 if (f.have_rho && slot != KR_SLOT_CORRELATION) {
@@ -1237,6 +1262,7 @@ void kr_resolve(const kr_context_t *ctx, kr_session_t *s, const char *transcript
     }
     sp.have_rho = f.have_rho;
     sp.rho = f.rho;
+    sp.rho_unheard = f.rho_unvalued && !f.have_rho && !f.have_vol;
     sp.n_weights_spoken = f.n_weights;
     for (i = 0; i < f.n_weights; i++) sp.weights_pct[i] = f.weights_pct[i];
     sp.window_years = f.window_years;

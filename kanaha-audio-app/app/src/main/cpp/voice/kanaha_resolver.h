@@ -99,6 +99,7 @@ typedef struct {
 
     /* As spoken, kept so a pending question can be finished next turn. */
     int have_rho;
+    int rho_unheard;                /* "correlation" said, but no value after it */
     int n_weights_spoken;           /* 0 = equal */
     double weights_pct[KR_MAX_ASSETS];
     int window_years;               /* -1 = not said; 0 = the whole file */

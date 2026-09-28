@@ -178,6 +178,20 @@ int main(void)
     RUN1("\"Similarly, the book\" simulates", "Similarly, the book at correlation.8.", KR_RUN,
          "Simulating one year forward");
     RUN1("\"variance on the port\"", "portfolio variance on the port", KR_RUN, "The book");
+    /* rehearsal 2026-09-27: the window closed before the value */
+    {
+        turn_t t[] = { { "Portfolio Variants on the book at Correlation", KR_ASK,
+                         "not its value" },
+                       { "correlation point eight", KR_RUN, "0.80" } };
+        run("clipped \"at correlation\" asks for the value, then runs it", t, 2);
+    }
+    {
+        /* the question does not trap: a fresh request replaces it */
+        turn_t t[] = { { "Portfolio Variants on the book at Correlation", KR_ASK,
+                         "not its value" },
+                       { "portfolio variance on the book", KR_RUN, "Portfolio variance." } };
+        run("  ... or a fresh request replaces the question", t, 2);
+    }
     {
         turn_t t[] = { { "The Book", KR_ASK, NULL },
                        { "portfolio variance", KR_RUN, "Portfolio variance." } };
