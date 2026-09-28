@@ -172,6 +172,9 @@ int main(void)
     /* spoken 2026-09-26 through the Moto, on the Pixel's hotspot */
     RUN1("\"on the block\" is the book", "Portfolio variance on the block.", KR_RUN,
          "Portfolio variance.");
+    /* spoken 2026-09-27 through the Moto, on the Pixel's hotspot */
+    RUN1("\"on the board\" is the book", "Portfolio variance on the board.", KR_RUN,
+         "Portfolio variance.");
     RUN1("\"Similarly, the book\" simulates", "Similarly, the book at correlation.8.", KR_RUN,
          "Simulating one year forward");
     RUN1("\"variance on the port\"", "portfolio variance on the port", KR_RUN, "The book");

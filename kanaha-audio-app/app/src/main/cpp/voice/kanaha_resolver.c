@@ -632,10 +632,11 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
         }
     }
     /* "the port" is how whisper heard "the book" in the spoken trials of
-     * 2026-09-22, and "the block" in the rehearsal of 2026-09-26. No other word
-     * here is "port" or "block" ("portfolio" is one word), and the read-back
-     * expands the book aloud, so a wrong match is heard. */
-    if (!f->book && find_w(ts, "book|books|port|block|blocks") >= 0) {
+     * 2026-09-22, "the block" in the rehearsal of 2026-09-26 and "the board" in
+     * the one of 2026-09-27. No other word here is "port", "block" or "board"
+     * ("portfolio" is one word), and the read-back expands the book aloud, so a
+     * wrong match is heard. */
+    if (!f->book && find_w(ts, "book|books|port|block|blocks|board|boards") >= 0) {
         if (ctx->n_books == 1)
             f->book = &ctx->books[0];
         else if (ctx->n_books > 1)
