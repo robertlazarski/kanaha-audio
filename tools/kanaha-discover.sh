@@ -5,9 +5,9 @@
 # Kanaha Discovery - find every Kanaha app on the local network: Kanaha Camera,
 # Kanaha Audio and Kanaha Calcs.
 #
-# The same file lives in all three projects (kanaha/tools/kanaha-discover.sh,
-# kanaha-audio/tools/kanaha-audio-discover.sh, kanaha-calcs/tools/kanaha-discover.sh),
-# so it answers the same wherever it is run from. Change all three together.
+# The same file lives in all three projects, under the same name --
+# tools/kanaha-discover.sh in kanaha, kanaha-audio and kanaha-calcs -- so it
+# answers the same wherever it is run from. Change all three together.
 #
 # Usage: kanaha-discover.sh [--kind camera|audio|calcs] [--json] [--ip IP] [--scan]
 #

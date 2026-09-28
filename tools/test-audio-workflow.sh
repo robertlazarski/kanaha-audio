@@ -149,10 +149,10 @@ discover_devices() {
 
     log "Discovering devices..."
 
-    # Try kanaha-audio-discover.sh if available
+    # Try kanaha-discover.sh if available
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-    if [[ -x "$SCRIPT_DIR/kanaha-audio-discover.sh" && -z "$AUDIO_ADDR" ]]; then
-        AUDIO_ADDR=$("$SCRIPT_DIR/kanaha-audio-discover.sh" --kind audio --json 2>/dev/null | \
+    if [[ -x "$SCRIPT_DIR/kanaha-discover.sh" && -z "$AUDIO_ADDR" ]]; then
+        AUDIO_ADDR=$("$SCRIPT_DIR/kanaha-discover.sh" --kind audio --json 2>/dev/null | \
             python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['ip'])" 2>/dev/null || true)
     fi
 

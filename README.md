@@ -140,16 +140,16 @@ The same script ships in all three projects.
 
 ```bash
 # mDNS (instant, requires avahi-utils), port scan if mDNS finds nothing
-./tools/kanaha-audio-discover.sh
+./tools/kanaha-discover.sh
 
 # Only the audio phones
-./tools/kanaha-audio-discover.sh --kind audio
+./tools/kanaha-discover.sh --kind audio
 
 # Direct IP
-./tools/kanaha-audio-discover.sh --ip 192.168.1.100
+./tools/kanaha-discover.sh --ip 192.168.1.100
 
 # JSON output (each entry has a "kind")
-./tools/kanaha-audio-discover.sh --json
+./tools/kanaha-discover.sh --json
 ```
 
 ## License

@@ -204,8 +204,8 @@ Kanaha Audio registers as an mDNS service for zero-config network discovery:
 avahi-browse -rp _https._tcp | grep "kanaha-audio"
 
 # Or use the discovery script (finds camera and calcs phones too)
-./tools/kanaha-audio-discover.sh --kind audio
-./tools/kanaha-audio-discover.sh --json
+./tools/kanaha-discover.sh --kind audio
+./tools/kanaha-discover.sh --json
 ```
 
 The mDNS TXT record includes `api=kanaha-audio` to distinguish from Kanaha Camera devices (`api=kanaha-camera-control`).
