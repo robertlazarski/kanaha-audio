@@ -562,6 +562,22 @@ static int whisper_bridge_search_keywords_unlocked(
     }
 
     LOGI("Collected %d words for keyword matching", total_tokens);
+    {
+        /* What was heard, as the matcher sees it. A phrase that matches nothing
+         * leaves no other trace, so without this a missed command cannot be
+         * told apart from a mis-heard one. */
+        char heard[512];
+        size_t used = 0;
+        heard[0] = '\0';
+        for (int w = 0; w < total_tokens && used < sizeof(heard) - 1; w++) {
+            int n = snprintf(heard + used, sizeof(heard) - used, "%s%s",
+                             w ? " " : "", tokens[w].word);
+            if (n < 0)
+                break;
+            used += (size_t)n < sizeof(heard) - used ? (size_t)n : sizeof(heard) - used - 1;
+        }
+        LOGI("Heard: '%s'", heard);
+    }
 
     /* ── Step 4: Sliding window keyword phrase matching ───────── */
     /*
