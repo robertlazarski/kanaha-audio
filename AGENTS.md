@@ -12,8 +12,8 @@ how to report a vulnerability. For deployment hardening see
 Kanaha Audio is an **Android app that runs a real Apache httpd in a forked child
 process**. It is not a library and not a typical Android app:
 
-- `libkanaha_audio_httpd.so` is Apache 2.4.66 (mod_ssl + mod_http2 + mod_axis2)
-  with OpenSSL 3.2.0 and Axis2/C 2.0.0 statically linked. It is **executed as a
+- `libkanaha_audio_httpd.so` is Apache 2.4.69 (mod_ssl + mod_http2 + mod_axis2)
+  with OpenSSL 3.5.9 and Axis2/C 2.0.0 statically linked. It is **executed as a
   binary**, not loaded as a library — which is why the manifest sets
   `android:extractNativeLibs="true"`.
 - `AudioSearchService` is an Axis2/C service reached over **HTTP/2 with mutual

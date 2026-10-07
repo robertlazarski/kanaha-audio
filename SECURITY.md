@@ -17,8 +17,8 @@ Statically linked into the server binary:
 
 | Component | Version | Role |
 |---|---|---|
-| Apache httpd | 2.4.66 | HTTP server, mod_ssl + mod_http2 |
-| OpenSSL | 3.2.0 | TLS 1.3, mutual authentication |
+| Apache httpd | 2.4.69 | HTTP server, mod_ssl + mod_http2 |
+| OpenSSL | 3.5.9 | TLS 1.3, mutual authentication |
 | Axis2/C | 2.0.0 | Service container, JSON-RPC dispatch |
 | nghttp2 | 1.64.0 | HTTP/2 |
 | whisper.cpp / ggml | — | Speech recognition, DTW token alignment |
@@ -148,7 +148,7 @@ its own model context; it does not share state with the httpd child.
 | `audio_sftp.c` | Outbound network + keys | Host key verification, `servers.json` parsing. |
 | `audio_recording.c` | Device microphone | Writer thread lifecycle, WAV header finalisation. |
 | `kanaha_mcp.c` | adb stdio | Same operations, no TLS; access control is adb itself. |
-| Apache + Axis2/C + OpenSSL | Network | Upstream code; statically linked, so "keep current" means rebuilding the binary. The shipped OpenSSL is 3.2.0 (the first release of that series); rebuild against a current 3.2.x/3.3.x. |
+| Apache + Axis2/C + OpenSSL | Network | Upstream code; statically linked, so "keep current" means rebuilding the binary. The shipped OpenSSL is 3.5.9, on the 3.5 LTS branch; rebuild against each 3.5.x security release. |
 
 ### Memory safety profile
 
@@ -196,8 +196,8 @@ upstream fix does not reach users until the binary is rebuilt and released:
 
 | Component | Minimum | Reason |
 |---|---|---|
-| Apache httpd | 2.4.66 | HTTP/2 and mod_ssl fixes |
-| OpenSSL | 3.2.0 | TLS 1.3 |
+| Apache httpd | 2.4.69 | HTTP/2 double-free and HTTP/2 Bomb fixes (2.4.67/2.4.68) |
+| OpenSSL | 3.5.9 | 3.5 LTS; 3.0 and 3.2 no longer receive fixes |
 | nghttp2 | 1.64.0 | HTTP/2 protocol handling |
 | Axis2/C | 2.0.0 | Current release |
 

@@ -5,7 +5,7 @@
 # link-httpd-axis2.sh (camera) + adds the audio DSP libs from build-android.sh.
 set -euo pipefail
 
-HTTPD=$HOME/android-cross-builds/httpd-2.4.66
+HTTPD=$HOME/android-cross-builds/httpd-2.4.69
 DEPS=$HOME/android-cross-builds/deps/arm64-v8a
 NDK=$HOME/Android/Sdk/ndk/28.0.12916984
 # android28: required because AAudio (-laaudio) is API 26+. The prebuilt httpd
@@ -136,3 +136,13 @@ $CXX -fPIC -o httpd-audio modules.o buildmark.o \
 echo "=== Link complete ==="
 file "$HTTPD/httpd-audio"
 ls -lh "$HTTPD/httpd-audio"
+
+# Install as the app server. jniLibs/*.so is gitignored, so a build that is not
+# copied here leaves the APK shipping whatever server was there before, and
+# nothing in git shows it.
+OUTPUT_DIR=$HOME/repos/kanaha-audio/kanaha-audio-app/app/src/main/jniLibs/arm64-v8a
+mkdir -p "$OUTPUT_DIR"
+cp "$HTTPD/httpd-audio" "$OUTPUT_DIR/libkanaha_audio_httpd.so"
+$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip --strip-all "$OUTPUT_DIR/libkanaha_audio_httpd.so"
+echo "=== Installed: $OUTPUT_DIR/libkanaha_audio_httpd.so ==="
+ls -lh "$OUTPUT_DIR/libkanaha_audio_httpd.so"

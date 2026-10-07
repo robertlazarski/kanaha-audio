@@ -4,7 +4,7 @@ Kanaha Audio shares the same security model as Kanaha Camera Control System.
 
 ## Transport Security — TLS is Mandatory
 
-The app serves requests via **Apache httpd 2.4.66 (mod_http2 + mod_ssl + mod_axis2)**
+The app serves requests via **Apache httpd 2.4.69 (mod_http2 + mod_ssl + mod_axis2)**
 over HTTP/2 (ALPN `h2`) with mutual TLS. See
 [PATH_B_HTTP2_MIGRATION.md](PATH_B_HTTP2_MIGRATION.md) for how the server moved
 from the original hand-rolled HTTP/1.1 server to real Apache (verified on device:

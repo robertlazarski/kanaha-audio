@@ -124,7 +124,7 @@ mkdir -p "$OUTPUT_DIR"
 #
 # It is the old hand-rolled OpenSSL server (apache_httpd_android.c), kept only
 # as a desktop test CLI. The app is served by real Apache, built separately by
-# build-httpd-audio.sh, which writes the same libkanaha_audio_httpd.so path.
+# build-httpd-audio.sh, which installs it as libkanaha_audio_httpd.so.
 #
 # This script used to copy it over that file. The result was an app that had
 # silently reverted to HTTP/1.1 with a server rejecting the Apache arguments
