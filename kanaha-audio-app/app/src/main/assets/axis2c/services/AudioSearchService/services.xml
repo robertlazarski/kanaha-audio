@@ -175,5 +175,32 @@
             <parameter name="contentType">application/json</parameter>
         </operation>
 
+        <operation name="playAudio">
+            <parameter name="mcpDescription">Play a WAV audio file through the device speaker. Use to play back recordings, preview audio, or as a lost phone finder.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"audio_file":{"type":"string","description":"Path to WAV file to play through the device speaker"}},"required":["audio_file"]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/playAudio</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="decodeLTC">
+            <parameter name="mcpDescription">Decode SMPTE/LTC timecode from a WAV recording. Returns timecode frames with sample-accurate positions. On-device equivalent of ltcdump. Use with Tentacle Sync recordings via iRig.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"audio_file":{"type":"string","description":"Path to WAV file containing LTC audio (44.1kHz or 48kHz)"},"channel":{"type":"integer","description":"Audio channel to decode (1-based, default 1)"}},"required":["audio_file"]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/decodeLTC</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
+        <operation name="sftpTransfer">
+            <parameter name="mcpDescription">Transfer audio file(s) to a storage server via SFTP. Uses ed25519 SSH key authentication. Server configuration from servers.json.</parameter>
+            <parameter name="mcpInputSchema">{"type":"object","properties":{"storage_server_id":{"type":"string","description":"Server ID from servers.json (e.g. control1)"},"audio_filename":{"type":"string","description":"Filename to transfer, or * for all WAV files"},"destination_folder":{"type":"string","description":"Remote directory path for uploaded files"}},"required":["storage_server_id","audio_filename","destination_folder"]}</parameter>
+            <messageReceiver class="axis2_json_rpc_msg_recv"/>
+            <parameter name="RESTMethod">POST</parameter>
+            <parameter name="RESTLocation">/sftpTransfer</parameter>
+            <parameter name="contentType">application/json</parameter>
+        </operation>
+
     </service>
 </serviceGroup>
