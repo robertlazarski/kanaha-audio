@@ -23,24 +23,23 @@ CVE-2026-49975 hardening applies.
   models dir via the `KANAHA_AUDIO_MODELS` env var.
 
 ## Native binary — BUILT (recipe)
-The packaged `jniLibs/arm64-v8a/libkanaha_audio_httpd.so` is now a **real Apache
-2.4.66** (mod_ssl + mod_http2 + mod_axis2) with `AudioSearchService` +
-whisper/yamnet/ltc/sftp statically linked — built and verified on a Pixel 10 Pro XL
-(2026-06-10): `ALPN: server accepted h2` → `HTTP/2 200`,
-`server: Apache/2.4.66 (Unix) OpenSSL/3.2.0 Axis2C/2.0.0`.
+The packaged `jniLibs/arm64-v8a/libkanaha_audio_httpd.so` is a **real Apache
+httpd** (mod_ssl + mod_http2 + mod_axis2) with `AudioSearchService` +
+whisper/yamnet/ltc/sftp statically linked. It was first built and verified on a
+Pixel 10 Pro XL on 2026-06-10, as Apache 2.4.66: `ALPN: server accepted h2` →
+`HTTP/2 200`, `server: Apache/2.4.66 (Unix) OpenSSL/3.2.0 Axis2C/2.0.0`. Current
+versions are in [`SECURITY.md`](../SECURITY.md).
 
-Build/rebuild recipe: **`~/android-cross-builds/link-httpd-audio.sh`** (clones the
-camera's `link-httpd-axis2.sh`, swapping in the audio service objects + DSP libs).
-It:
+Build/rebuild recipe: **`build-httpd-audio.sh`** in this repository. It:
 1. Compiles `axis2c/axis2_static_service_adapter.c` (strong override of mod_axis2's
    weak `audio_search_service_invoke_json`) + `audio_search_service.c` + the DSP
    (`whisper_android_bridge.c`, `yamnet_bridge.c`, `audio_recording.c`, …) into
    `libkanaha_audio_services.a`.
-2. Links real httpd (`httpd-2.4.66` static module set) + `libmod_axis2.a` +
+2. Links real httpd (the static module set from `~/android-cross-builds/httpd-<version>`) + `libmod_axis2.a` +
    `libaxis2_engine.a` (whole-archive) + `libkanaha_audio_services.a` (whole-archive)
    + whisper/tflite/ruy/ltc/ssh2/aaudio. **Link with `clang++`** (not `clang`) —
    tflite/ruy need libc++/libc++abi. **android28** target (AAudio is API 26+).
-3. Strip with `llvm-strip --strip-unneeded` → copy to the jniLibs path (filename
+3. Copies to the jniLibs path and strips with `llvm-strip --strip-all` (filename
    unchanged; `AudioService.java` and the `pkill` pattern still reference it).
 
 Then `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew :app:assembleDebug`
