@@ -1,0 +1,14 @@
+{
+  "books": {
+    "demo5": {
+      "spoken_as": ["the book", "our book", "the usual five", "the demo book", "the usual book"],
+      "assets": ["MSFT", "AAPL", "AMZN", "JPM", "JNJ"],
+      "weights_percent": [20, 20, 20, 20, 20],
+      "source_file": "wiki_2008_2018_daily_closes.csv",
+      "columns": "*_AdjClose",
+      "window_years": 10,
+      "periods_per_year": 252,
+      "note": "Public-domain prices that every Kanaha Calcs build bundles. A named book shortens what a person must say, never what the answer must report: expand it aloud every time."
+    }
+  }
+}

@@ -52,7 +52,7 @@ typedef struct {
     int n_assets;
     char tickers[KR_MAX_ASSETS][KR_TICKER_LEN];
     double weights_pct[KR_MAX_ASSETS];
-    char file[KR_NAME_LEN];                        /* "fis_daily_closes.csv" */
+    char file[KR_NAME_LEN];                        /* "wiki_2008_2018_daily_closes.csv" */
     int window_years;                              /* 0 = the whole file */
 } kr_book_t;
 
@@ -129,11 +129,11 @@ void kr_resolve(const kr_context_t *ctx, kr_session_t *s,
                 const char *transcript, kr_result_t *out);
 
 /* What a spec is, as the room hears it, without the operation: "The book —
- * MSFT, AAPL, AMZN, JPM, JNJ, equal weights, ten years of the FIS file".
+ * MSFT, AAPL, AMZN, JPM, JNJ, equal weights, ten years of the wiki file".
  * Every answer opens with this, so a book is expanded aloud each time. */
 void kr_describe(const kr_spec_t *sp, char *buf, int len);
 
-/* The spoken name of a file: "the FIS file" for fis_daily_closes.csv. */
+/* The spoken name of a file: "the wiki file" for wiki_2008_2018_daily_closes.csv. */
 void kr_file_spoken(const kr_file_t *f, char *buf, int len);
 
 #endif /* KANAHA_RESOLVER_H */

@@ -117,6 +117,19 @@ No Intent IPC needed (unlike [Kanaha Camera](https://github.com/robertlazarski/k
 | `decodeLTC` | Decode SMPTE/LTC timecode from WAV (libltc) |
 | `sftpTransfer` | Transfer audio files to storage server via SFTP (libssh2) |
 
+## Voice Client for Kanaha Calcs and Camera
+
+Kanaha Audio is also an Axis2/C *client*. Spoken requests become calls to the other Kanaha phones:
+
+1. whisper.cpp hears the phrase.
+2. A fixed grammar in C resolves it, with no language model in the path.
+3. flite reads it back.
+4. Axis2/C's HTTP/2 JSON client sends it over mutual TLS:
+   - [Kanaha Calcs](https://github.com/robertlazarski/kanaha-calcs) for portfolio variance, a chosen-correlation regime or a Monte Carlo value at risk
+   - [Kanaha Camera](https://github.com/robertlazarski/kanaha) to start or stop recording, or to have Gemini Nano describe the newest clip
+
+[`tools/kanaha-books.example.json`](tools/kanaha-books.example.json) is a working books file on the public data every Calcs build bundles. `tools/kanaha-voice-setup.sh` points this phone at the others. The [Kanaha Calcs README](https://github.com/robertlazarski/kanaha-calcs#voice-kanaha-audio-as-a-client) shows the phrases and what comes back. `tests/voice` holds the resolver tests and `kanaha_voice_cli`, which runs the same chain from a laptop.
+
 ## Kanaha Audio MCP Support
 
 Kanaha Audio exposes all 15 operations as MCP tools, so Claude can record audio, search for keywords, detect instruments, and decode timecode directly. See [MCP.md](https://github.com/robertlazarski/kanaha-audio/blob/main/docs/MCP.md) for Claude Desktop configuration.

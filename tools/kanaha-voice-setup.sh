@@ -10,6 +10,9 @@ set -euo pipefail
 #                              [--camera <ip>] [--camera-port 8443] [--camera-name camera.local]
 #                              [--no-autostart]
 #
+# tools/kanaha-books.example.json is a working books file: one book, five names,
+# on the public-domain 2008-2018 prices every Kanaha Calcs build bundles.
+#
 # Without --calcs the calcs phone is found by mDNS: the _https._tcp service
 # whose TXT record carries api=kanaha-calcs. Never by its .local hostname,
 # which Android randomizes per boot. The address found is written into the

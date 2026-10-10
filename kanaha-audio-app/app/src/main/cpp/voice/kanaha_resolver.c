@@ -103,7 +103,7 @@ static void push(toks_t *ts, tok_type_t type, const char *s, int len)
  * speaker marks (">>"), and split into words, numbers and '%'.
  *
  *  - A period after a single letter is an initial: "J.P. Morgan" becomes
- *    "jp morgan", "F.I.S." becomes "fis". Splitting there would lose JPM.
+ *    "jp morgan", "U.S." becomes "us". Splitting there would lose JPM.
  *  - A period before a digit starts a number: "correlation.8" is
  *    "correlation" then ".8".
  *  - '&' is "and": "Johnson & Johnson" and "Johnson and Johnson" are the same
@@ -476,9 +476,9 @@ static int decimals_word(int d, char *buf, int len)
 }
 
 /* The words of a file's name, lower-cased, split on '_', '.', '-' and space,
- * without "csv": fis_daily_closes.csv -> fis, daily, closes. The caller
- * compares these across files to find each file's distinctive words -- "fis"
- * for fis_daily_closes.csv against wiki_daily_closes_10yr.csv. */
+ * without "csv": vendor_daily_closes.csv -> vendor, daily, closes. The caller
+ * compares these across files to find each file's distinctive words --
+ * "vendor" for vendor_daily_closes.csv against wiki_2008_2018_daily_closes.csv. */
 static void file_words(const kr_file_t *f, char words[8][TOK_LEN], int *n)
 {
     char tmp[KR_NAME_LEN];
@@ -724,7 +724,7 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
 
     /* Files, by their distinctive words: a word of file i's name that no
      * other file's name contains. "daily" and "closes" are in every name here
-     * and say nothing; "fis" or "wiki" picks one file. Several files can be
+     * and say nothing; "vendor" or "wiki" picks one file. Several files can be
      * marked -- kr_resolve() treats that as no hint at all. */
     for (i = 0; i < ctx->n_files; i++) {
         char w[8][TOK_LEN];
@@ -752,8 +752,9 @@ static void find_features(const kr_context_t *ctx, const toks_t *ts, feat_t *f)
 /* the spec                                                                  */
 /* ------------------------------------------------------------------------ */
 
-/* How a file is named aloud: its first name word, "the FIS file" (a word of
- * three letters or fewer is read as an acronym and upper-cased), or the
+/* How a file is named aloud: its first name word, "the wiki file" or "the
+ * FED file" (a word of three letters or fewer is read as an acronym and
+ * upper-cased), or the
  * file name itself when it has no words. */
 void kr_file_spoken(const kr_file_t *f, char *buf, int len)
 {

@@ -51,13 +51,13 @@ static void fixtures(void)
         snprintf(b->tickers[i], KR_TICKER_LEN, "%s", tickers[i]);
         b->weights_pct[i] = 20;
     }
-    snprintf(b->file, sizeof(b->file), "fis_daily_closes.csv");
+    snprintf(b->file, sizeof(b->file), "vendor_daily_closes.csv");
     b->window_years = 10;
 
     add_file(0, "demo_returns.csv", "");
     add_file(1, "fed_h10_fx_10yr.csv", "DTWEXBGS AUDUSD EURUSD GBPUSD USDJPY");
-    add_file(2, "wiki_daily_closes_10yr.csv", "MSFT AAPL AMZN JPM JNJ");
-    add_file(3, "fis_daily_closes.csv",
+    add_file(2, "wiki_2008_2018_daily_closes.csv", "MSFT AAPL AMZN JPM JNJ");
+    add_file(3, "vendor_daily_closes.csv",
              "MSFT AAPL AMZN JPM JNJ SPY ACWI UUP EURUSD USDJPY GBPUSD AUDUSD");
     add_file(4, "acwi_monthly_returns.csv", "");
 
@@ -134,7 +134,8 @@ static void expect_spec(const char *label, kr_op_t op, kr_regime_t regime, const
 }
 
 #define FIVE "MSFT AAPL AMZN JPM JNJ"
-#define FIS  "fis_daily_closes.csv"
+#define VENDOR  "vendor_daily_closes.csv"
+#define WIKI    "wiki_2008_2018_daily_closes.csv"
 
 int main(void)
 {
@@ -144,14 +145,14 @@ int main(void)
 
     /* spoken 2026-09-22 */
     RUN1("portfolio variance on the book", "portfolio variance on the book", KR_RUN,
-         "The book \xe2\x80\x94 MSFT, AAPL, AMZN, JPM, JNJ, equal weights, ten years of the FIS file");
-    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, FIS, 2520);
+         "The book \xe2\x80\x94 MSFT, AAPL, AMZN, JPM, JNJ, equal weights, ten years of the vendor file");
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, VENDOR, 2520);
     check(fabs(R.spec.weights[0] - 0.2) < 1e-12 && R.spec.weights_equal, "  equal weights", "");
     check(strstr(R.say, "Portfolio variance.") != NULL, "  read-back names the operation", R.say);
 
     /* spoken: whisper heard "variants" */
     RUN1("\"Portfolio variants on the book.\"", "Portfolio variants on the book.", KR_RUN, NULL);
-    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, FIS, 2520);
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, VENDOR, 2520);
 
     /* spoken. The model ran this; v2 of the flow doc settled that a book names
      * a portfolio, not an operation, so it earns one question. */
@@ -201,34 +202,34 @@ int main(void)
     /* spoken 2026-09-21: names plus a file named in the utterance */
     RUN1("five names, file named", "portfolio variance for Microsoft, Apple, Amazon, JPMorgan "
          "and Johnson and Johnson, equal weights, all ten years of daily data in "
-         "fis_daily_closes.csv", KR_RUN, "Five names, MSFT, AAPL, AMZN, JPM, JNJ");
-    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, FIS, 2520);
+         "vendor_daily_closes.csv", KR_RUN, "Five names, MSFT, AAPL, AMZN, JPM, JNJ");
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, VENDOR, 2520);
 
     /* spoken 2026-09-21. The model picked the wiki file silently and answered
      * 23.39 percent; the rule written afterwards makes it a question. */
     RUN1("five names, \"the file on the phone\" asks which file",
          "portfolio variance for Microsoft, Apple, Amazon, JPMorgan and Johnson and Johnson, "
          "equal weights, ten years of daily data from the file on the phone", KR_ASK,
-         "Two files on the phone carry those names: the wiki file and the FIS file. Which one?");
+         "Two files on the phone carry those names: the wiki file and the vendor file. Which one?");
 
     /* spoken 2026-09-22, two turns */
     {
         turn_t t[] = {
             { "Portfolio variance for Microsoft Apple Amazon JP Morgan and Johnson and Johnson. "
               "Equal weights 10 years.", KR_ASK, "Which one?" },
-            { "The FIS daily closes file.", KR_RUN, "ten years of the FIS file" },
+            { "The vendor daily closes file.", KR_RUN, "ten years of the vendor file" },
         };
-        run("names, then \"The FIS daily closes file.\"", t, 2);
-        expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, FIS, 2520);
+        run("names, then \"The vendor daily closes file.\"", t, 2);
+        expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, VENDOR, 2520);
     }
     {
         turn_t t[] = {
             { "[BLANK_AUDIO] Portfolio variance for Microsoft, Apple, Amazon, JP Morgan, and "
               "Johnson & Johnson.  Equal weights 10 years of daily data from", KR_ASK, NULL },
-            { "[BLANK_AUDIO] Use the FIS daily closes file", KR_RUN, NULL },
+            { "[BLANK_AUDIO] Use the vendor daily closes file", KR_RUN, NULL },
         };
-        run("clipped \"...from\", then \"Use the FIS...\"", t, 2);
-        expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, FIS, 2520);
+        run("clipped \"...from\", then \"Use the vendor...\"", t, 2);
+        expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, VENDOR, 2520);
     }
     {
         turn_t t[] = {
@@ -238,7 +239,7 @@ int main(void)
         };
         run("\"10 years old\", then the wiki file", t, 2);
         expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE,
-                    "wiki_daily_closes_10yr.csv", 2520);
+                    "wiki_2008_2018_daily_closes.csv", 2520);
     }
 
     /* spoken 2026-09-22: Apple fell out of the clip; four names is still a request */
@@ -246,31 +247,31 @@ int main(void)
         turn_t t[] = {
             { "Portfolio variance for Microsoft Amazon, JP Morgan, and Johnson & Johnson.  "
               "Equal weights, 10 years of daily data", KR_ASK, "Which one?" },
-            { "fis", KR_RUN, "Four names, MSFT, AMZN, JPM, JNJ" },
+            { "vendor", KR_RUN, "Four names, MSFT, AMZN, JPM, JNJ" },
         };
         run("four names (no Apple)", t, 2);
-        expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, "MSFT AMZN JPM JNJ", FIS,
+        expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, "MSFT AMZN JPM JNJ", VENDOR,
                     2520);
         check(fabs(R.spec.weights[0] - 0.25) < 1e-12, "  equal weights of 25", "");
     }
 
     /* spoken 2026-09-22 */
     RUN1("names and file in one sentence", "Portfolio variance for Microsoft Apple Amazon JP "
-         "Morgan and Johnson and Johnson. Equal weights 10 years of daily data from the FIS "
+         "Morgan and Johnson and Johnson. Equal weights 10 years of daily data from the vendor "
          "daily closes file.", KR_RUN, NULL);
-    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, FIS, 2520);
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, VENDOR, 2520);
 
     RUN1("the last year", "portfolio variance on the book over the last year", KR_RUN,
-         "the last year of the FIS file");
-    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, FIS, 252);
+         "the last year of the vendor file");
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, VENDOR, 252);
     RUN1("twelve months", "variance on the book, last twelve months", KR_RUN, NULL);
-    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, FIS, 252);
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, VENDOR, 252);
     RUN1("three years", "the book's variance over three years", KR_RUN, "three years");
-    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, FIS, 756);
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, VENDOR, 756);
 
-    RUN1("J.P. Morgan with initials", "variance for Microsoft and J.P. Morgan from the FIS file",
+    RUN1("J.P. Morgan with initials", "variance for Microsoft and J.P. Morgan from the vendor file",
          KR_RUN, "Two names, MSFT, JPM");
-    RUN1("J and J", "variance for Apple and J and J, fis file", KR_RUN, "AAPL, JNJ");
+    RUN1("J and J", "variance for Apple and J and J, vendor file", KR_RUN, "AAPL, JNJ");
 
     printf("route B: a chosen regime\n");
 
@@ -278,19 +279,19 @@ int main(void)
     RUN1("the book at correlation point eight", "the book at correlation point eight", KR_RUN,
          "Every correlation set to 0.80, historical vols kept: a hypothetical regime. "
          "Portfolio variance.");
-    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_STRESSED, FIVE, FIS, 2520);
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_STRESSED, FIVE, VENDOR, 2520);
     check(fabs(R.spec.rho - 0.8) < 1e-12, "  rho 0.8", "");
 
     /* spoken 2026-09-21 */
     RUN1("same book, correlations at point eight", "same book, correlations at point eight",
          KR_RUN, NULL);
-    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_STRESSED, FIVE, FIS, 2520);
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_STRESSED, FIVE, VENDOR, 2520);
 
     /* spoken 2026-09-22. The model asked for the previous run's vols; with a
      * book, the resolver has the file and needs no memory of a previous turn. */
     RUN1("\"Same book, but put every correlation at 0.8\"",
          "[BLANK_AUDIO] Same book, but put every correlation at 0.8", KR_RUN, NULL);
-    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_STRESSED, FIVE, FIS, 2520);
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_STRESSED, FIVE, VENDOR, 2520);
 
     /* spoken 2026-09-22: "vowel" for vol, "correlation.5" glued, no subject */
     {
@@ -334,13 +335,13 @@ int main(void)
     RUN1("simulate the book forward a year", "Simulate the book forward a year.", KR_RUN,
          "Simulating one year forward, ten thousand paths, seed 12345.");
     expect_spec("  spec (\"a year\" is the horizon, not the window)", KR_OP_SIMULATE,
-                KR_REGIME_HISTORICAL, FIVE, FIS, 2520);
+                KR_REGIME_HISTORICAL, FIVE, VENDOR, 2520);
     check(R.spec.seed == 12345 && R.spec.n_simulations == 10000, "  seed and paths", "");
 
     /* spoken 2026-09-22, arrived damaged: "simulate it" was lost, "forward" survived */
     RUN1("\"Same book at correlation.8,  forward\"", "Same book at correlation.8,  forward",
          KR_RUN, "Simulating");
-    expect_spec("  spec", KR_OP_SIMULATE, KR_REGIME_STRESSED, FIVE, FIS, 2520);
+    expect_spec("  spec", KR_OP_SIMULATE, KR_REGIME_STRESSED, FIVE, VENDOR, 2520);
 
     RUN1("value at risk", "value at risk on the book", KR_RUN, "Simulating");
 
@@ -379,12 +380,12 @@ int main(void)
          "I heard 2 weights for 5 names");
     /* spoken 2026-09-22: the start of the sentence was lost */
     RUN1("one name is not a portfolio", "[BLANK_AUDIO] Johnson & Johnson equal weights 10 years "
-         "of daily data from the FIS daily closes  file with every correlation at 0.8", KR_REFUSE,
+         "of daily data from the vendor daily closes  file with every correlation at 0.8", KR_REFUSE,
          "I only heard one name, JNJ");
     RUN1("a vol in decimals", "the book with every vol at 0.22 and correlation 0.5", KR_REFUSE,
          "whole percent");
     RUN1("the book on another file", "variance on the book from the wiki file", KR_REFUSE,
-         "The book is defined on the FIS file");
+         "The book is defined on the vendor file");
     RUN1("a name it cannot map is not guessed", "variance for Microsoft and USDJPY", KR_REFUSE,
          "I only heard one name, MSFT");
 
@@ -394,13 +395,13 @@ int main(void)
     RUN1("a blank clip", "[BLANK_AUDIO] [BEEP]", KR_SILENT, NULL);
     RUN1("room chatter", "okay so as I was saying about the weather", KR_SILENT, NULL);
     /* spoken 2026-09-22, when nothing was pending */
-    RUN1("a file on its own", "The FIS daily closes file.", KR_SILENT, NULL);
+    RUN1("a file on its own", "The vendor daily closes file.", KR_SILENT, NULL);
     {
         turn_t t[] = {
             { "Portfolio variance for Microsoft Apple Amazon JP Morgan and Johnson and Johnson.",
               KR_ASK, "Which one?" },
             { "[BLANK_AUDIO]", KR_SILENT, NULL },
-            { "the FIS one", KR_RUN, NULL },
+            { "the vendor one", KR_RUN, NULL },
         };
         run("a blank clip keeps the pending question", t, 3);
     }
@@ -412,6 +413,29 @@ int main(void)
         };
         run("a new full request replaces the pending question", t, 2);
     }
+
+    /* A clean install: the calcs phone holds only the public files it bundles,
+     * and the book is tools/kanaha-books.example.json's, on the 2008-2018
+     * file. Nothing licensed is needed for the voice path to run. */
+    printf("public data only\n");
+    snprintf(BOOKS[0].file, sizeof(BOOKS[0].file), "%s", WIKI);
+    add_file(0, "acwi_monthly_returns.csv", "");
+    add_file(1, "fed_h10_fx_10yr.csv", "DTWEXBGS AUDUSD EURUSD GBPUSD USDJPY");
+    add_file(2, WIKI, "MSFT AAPL AMZN JPM JNJ");
+    CTX.n_files = 3;
+    RUN1("portfolio variance on the book", "portfolio variance on the book", KR_RUN,
+         "ten years of the wiki file");
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, WIKI, 2520);
+    RUN1("the book at correlation point eight", "portfolio variance on the book at correlation point eight",
+         KR_RUN, NULL);
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_STRESSED, FIVE, WIKI, 2520);
+    RUN1("simulate the book forward a year", "simulate the book forward a year", KR_RUN, "Simulating");
+    expect_spec("  spec", KR_OP_SIMULATE, KR_REGIME_HISTORICAL, FIVE, WIKI, 2520);
+    /* the five names alone: one file carries them, so nothing to ask; with
+     * no window said, the whole file */
+    RUN1("the five names, one file", "Portfolio variance for Microsoft Apple Amazon JP Morgan and Johnson and Johnson.",
+         KR_RUN, "the wiki file");
+    expect_spec("  spec", KR_OP_VARIANCE, KR_REGIME_HISTORICAL, FIVE, WIKI, 0);
 
     printf("%s: %d of %d checks failed\n", failures ? "FAILED" : "PASSED", failures, checks);
     return failures ? 1 : 0;
