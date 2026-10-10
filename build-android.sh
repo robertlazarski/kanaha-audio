@@ -18,7 +18,9 @@ CC=$TOOLCHAIN/bin/aarch64-linux-android28-clang
 CXX=$TOOLCHAIN/bin/aarch64-linux-android28-clang++
 AR=$TOOLCHAIN/bin/llvm-ar
 
-# Dependencies (all cross-compiled static libs)
+# Dependencies (all cross-compiled static libs). httpd, Axis2/C, OpenSSL and the
+# other shared ones come from kanaha-android-deps; the DSP libraries (whisper,
+# TFLite, flite, libltc, libssh2) are built per docs/ANDROID_CROSS_COMPILATION.md.
 DEPS=$HOME/android-cross-builds/deps/arm64-v8a
 
 # Source directories

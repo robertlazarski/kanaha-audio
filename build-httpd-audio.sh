@@ -5,8 +5,23 @@
 # link-httpd-axis2.sh (camera) + adds the audio DSP libs from build-android.sh.
 set -euo pipefail
 
-HTTPD=$HOME/android-cross-builds/httpd-2.4.69
-DEPS=$HOME/android-cross-builds/deps/arm64-v8a
+# Native dependencies come from kanaha-android-deps
+# (https://github.com/robertlazarski/kanaha-android-deps); run its build-all.sh
+# first. It records what it built in BUILD-INFO, including the httpd version
+# whose build tree this script links from.
+DEPS_WORK=$HOME/android-cross-builds
+DEPS=$DEPS_WORK/deps/arm64-v8a
+if [ ! -f "$DEPS/BUILD-INFO" ]; then
+    echo "error: $DEPS/BUILD-INFO not found; build kanaha-android-deps first" >&2
+    exit 1
+fi
+HTTPD_VERSION=$(sed -n 's/^HTTPD_VERSION=//p' "$DEPS/BUILD-INFO")
+AXIS2C_REF=$(sed -n 's/^AXIS2C_REF=//p' "$DEPS/BUILD-INFO")
+if [ -z "$HTTPD_VERSION" ] || [ -z "$AXIS2C_REF" ]; then
+    echo "error: $DEPS/BUILD-INFO lacks HTTPD_VERSION or AXIS2C_REF; rebuild kanaha-android-deps" >&2
+    exit 1
+fi
+HTTPD="$DEPS_WORK/httpd-$HTTPD_VERSION"
 NDK=$HOME/Android/Sdk/ndk/28.0.12916984
 # android28: required because AAudio (-laaudio) is API 26+. The prebuilt httpd
 # .a files were built at android21 and link forward-compatibly under android28.
@@ -18,8 +33,11 @@ AR=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
 
 SRC=$HOME/repos/kanaha-audio/kanaha-audio-app/app/src/main/cpp
 # The HTTP/2 JSON client the voice path uses to call Kanaha Calcs is compiled
-# from the Axis2/C checkout, not copied -- the same rule as calcs' service.
-AXIS2_SRC=$HOME/repos/axis-axis2-c-core
+# from Axis2/C source, not copied -- the same rule as calcs' service. The source
+# is the tree kanaha-android-deps exported at the commit its libraries were
+# built from, never a checkout that may have moved on: a header that disagrees
+# with the library it describes fails at run time, not at link time.
+AXIS2_SRC="$DEPS_WORK/axis2c-src-${AXIS2C_REF:0:9}"
 
 INCLUDES="-I$SRC -I$DEPS/include -I$DEPS/include/apr-1 \
  -I$DEPS/include/axis2-2.0.0 -I$DEPS/include/axis2-2.0.0/platforms/unix \

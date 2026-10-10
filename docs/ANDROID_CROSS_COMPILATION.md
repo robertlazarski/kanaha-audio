@@ -16,7 +16,7 @@ Kanaha Audio is a dual-model audio analysis service running on Android. Both ML 
 | FlatBuffers (host) | Schema compiler for TFLite build | flatc (host binary) | ~4.5 MB |
 | flite + cmu_us_kal16 voice | Speech synthesis for the `speak` operation | libflite.a, libflite_usenglish.a, libflite_cmulex.a, libflite_cmu_us_kal16.a | ~6.8 MB |
 
-The shared dependencies (Apache httpd, Axis2/C, OpenSSL, nghttp2, APR, json-c) are documented in the [Kanaha Camera cross-compilation guide](../../kanaha/docs/ANDROID_CROSS_COMPILATION.md) and are reused by Kanaha Audio from the same `~/android-cross-builds/deps/arm64-v8a/` directory.
+The shared dependencies (Apache httpd, Axis2/C, OpenSSL, nghttp2, APR, APR-util, expat, PCRE2, json-c) are built by [kanaha-android-deps](https://github.com/robertlazarski/kanaha-android-deps): run its `build-all.sh` before this guide. It installs into the same `~/android-cross-builds/deps/arm64-v8a/` directory the libraries below use, and records the httpd version `build-httpd-audio.sh` links against in `BUILD-INFO`.
 
 ### Build Directory Structure
 
